@@ -96,6 +96,8 @@ def _check(res, n_test=16):
     ("arg", {"rationale_source": "gpt"}),
     ("arg", {"rationale_source": "llm"}),
     ("factguard", {}),
+    ("bert", {"use_zs": True}),
+    ("factguard", {"use_zs": True}),
     ("arg_d", {}),
     ("factguard_d", {}),
 ])
@@ -162,6 +164,9 @@ def test_gate_targets(session):
     assert torch.equal(target[sel], (v[sel] < 0.45).float())
     assert torch.all((target >= 0) & (target <= 1))
     assert torch.all(weight[is_claim & (y == 1)] <= m.cfg["eta"] + 1e-6)
+    # no supervision where the LLM is undecided
+    undecided = is_claim & ((v - 0.5).abs() <= 0.05)
+    assert torch.all(weight[undecided] == 0)
 
 
 def test_replace_noise_eval(session):

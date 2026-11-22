@@ -20,11 +20,12 @@ Training uses only article-level labels:
 
     L = BCE(y_hat, y) + lambda_mil * BCE(P_MIL, y) + lambda_gate * L_gate
 
-L_gate supervises the gate with "did the LLM take the right side on this instance?".  For the
-holistic instance this is observable.  For claims it follows from the MIL asymmetry: in real news
-every claim is unproblematic, so the LLM was right iff it did not suspect the claim; in fake news
-the latent claim state is replaced by its noisy-OR posterior q_k = p_k / P_MIL (stop-gradient,
-enabled after a warm-up).
+L_gate supervises the gate with "did the LLM take the right side on this instance?", for the
+instances on which it took a side (|score - 0.5| > delta).  For the holistic instance this is
+observable.  For claims it follows from the MIL asymmetry: in real news every claim is
+unproblematic, so the LLM was right iff it did not suspect the claim; in fake news the latent
+claim state is replaced by its noisy-OR posterior q_k = p_k / P_MIL (stop-gradient, enabled after
+a warm-up).
 """
 import math
 from typing import Any, Dict, List, Tuple
@@ -237,7 +238,8 @@ class CLARA(Method):
         q = (out["p"] / out["p_nor"][item].clamp_min(1e-6)).clamp(0, 1).detach()
         z = torch.where(is_overall, y, torch.where(y > 0.5, q, torch.zeros_like(y)))
         target = z * says_fake + (1 - z) * says_real
-        weight = data["valid"][inst].clone()
+        # instances on which the LLM took no side carry no reliability evidence
+        weight = data["valid"][inst] * (says_fake + says_real)
         fake_claim = (~is_overall) & (y > 0.5)
         weight = torch.where(fake_claim, weight * cfg["eta"], weight)
         return target, weight

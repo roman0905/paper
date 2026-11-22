@@ -130,14 +130,21 @@ def best_threshold(y_true: Sequence[int], prob: Sequence[float]) -> float:
 
 
 def localisation_metrics(scores: Sequence[Sequence[float]], gold: Sequence[int]) -> Dict[str, float]:
-    """Hit@1 / MRR of the gold (tampered) unit among the per-item unit scores."""
-    hits, rr, n = 0.0, 0.0, 0
+    """Hit@1 / MRR of the gold (tampered) unit among the per-item unit scores.
+
+    Ties are broken at random in expectation: a gold unit tied with m others for the top score
+    counts 1/(m+1), and its rank is the mean rank of the tied group.  ``chance`` is the Hit@1 of
+    a uniformly random guess on the same items.
+    """
+    hits, rr, chance, n = 0.0, 0.0, 0.0, 0
     for s, g in zip(scores, gold):
         s = np.asarray(s, dtype=np.float64)
         if len(s) == 0 or g is None or g < 0 or g >= len(s):
             continue
-        rank = 1 + int((s > s[g]).sum())
-        hits += float(rank == 1)
-        rr += 1.0 / rank
+        greater = int((s > s[g]).sum())
+        ties = int((s == s[g]).sum()) - 1
+        hits += 1.0 / (ties + 1) if greater == 0 else 0.0
+        rr += 1.0 / (1 + greater + ties / 2.0)
+        chance += 1.0 / len(s)
         n += 1
-    return {"hit@1": hits / max(n, 1), "mrr": rr / max(n, 1), "n": float(n)}
+    return {"hit@1": hits / max(n, 1), "mrr": rr / max(n, 1), "chance": chance / max(n, 1), "n": float(n)}

@@ -16,6 +16,9 @@ from clara.data import LABEL, PRED, SPLITS  # noqa: E402
 from clara.text import split_sentences  # noqa: E402
 
 
+EXTRA_FIELDS = ("orig_id", "tamper_sent", "orig_sentence", "new_sentence", "style", "rewritten")
+
+
 def read_jsonl(path):
     out = {}
     if not os.path.exists(path):
@@ -38,6 +41,7 @@ def main():
     ap.add_argument("--llm", required=True)
     ap.add_argument("--out", required=True)
     ap.add_argument("--domains", default=None, help="optional JSON {id: domain}")
+    ap.add_argument("--splits", nargs="+", default=list(SPLITS))
     args = ap.parse_args()
 
     domains = {}
@@ -45,7 +49,7 @@ def main():
         domains = {int(k): v for k, v in json.load(open(args.domains, encoding="utf-8")).items()}
 
     items, stats = [], collections.Counter()
-    for sp in SPLITS:
+    for sp in args.splits:
         raw = json.load(open(os.path.join(args.data, sp + ".json"), encoding="utf-8"))
         cache = {t: read_jsonl(os.path.join(args.llm_dir, "{}.{}.{}.jsonl".format(args.name, sp, t)))
                  for t in ("clara", "td", "cs", "tc", "zs", "cot")}
@@ -61,6 +65,9 @@ def main():
             }
             if iid in domains:
                 it["domain"] = domains[iid]
+            for k in EXTRA_FIELDS:        # provenance of perturbed items
+                if k in d:
+                    it[k] = d[k]
             for t in ("td", "cs", "cot"):
                 r = cache[t].get(iid)
                 if r is not None:

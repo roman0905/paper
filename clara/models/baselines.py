@@ -22,23 +22,51 @@ from clara.models.base import Method
 from clara.models.layers import MLP, CrossAttention, MaskAttention, bce
 
 
+def zs_logit(items) -> np.ndarray:
+    """logit of the LLM's zero-shot soft judgment P(fake); 0 when it is unavailable."""
+    p = np.array([(it.get("zs") or {}).get("p_fake") or 0.5 for it in items], dtype=np.float64)
+    p = np.clip(p, 0.02, 0.98)
+    return np.log(p / (1 - p)).astype(np.float32)
+
+
+class ScoreFusion(nn.Module):
+    """Optional late fusion of the LLM's zero-shot soft judgment: logit += w * logit(p_zs).
+
+    Lets a baseline consume the same kind of numeric LLM signal that CLARA reads, so that
+    differences are not due to the mere availability of an LLM confidence score."""
+
+    def __init__(self, enabled: bool):
+        super().__init__()
+        self.enabled = enabled
+        if enabled:
+            self.w = nn.Parameter(torch.tensor(0.5))
+
+    def forward(self, logit_: torch.Tensor, data, idx) -> torch.Tensor:
+        return logit_ + self.w * data["zs"][idx] if self.enabled else logit_
+
+
 class TextOnly(Method):
+    """cfg: ``use_zs`` adds the LLM zero-shot score by late fusion ("BERT + ZS")."""
+
     def __init__(self, cfg, store, lang):
         super().__init__(cfg, store, lang)
         self.top = store.new_top()
         self.pool = MaskAttention(self.dim)
         self.mlp = MLP(self.dim, [384], 0.2)
+        self.fusion = ScoreFusion(bool(cfg.get("use_zs")))
 
     def prepare(self, items):
         return {
             "label": np.array([it["label"] for it in items], dtype=np.int64),
             "content": self.store.register([it["content"] for it in items], max_len=self.cfg.get("max_len", 170)),
+            "zs": zs_logit(items),
         }
 
     def forward(self, data, idx):
         h, m = self.encode(self.top, data["content"][idx])
         feat, _ = self.pool(h, m)
-        return {"prob": torch.sigmoid(self.mlp(feat).squeeze(-1)), "feature": feat}
+        z = self.fusion(self.mlp(feat).squeeze(-1), data, idx)
+        return {"prob": torch.sigmoid(z), "feature": feat}
 
     def loss(self, out, data, idx, epoch):
         l = bce(out["prob"], data["label"][idx].float())
@@ -76,15 +104,17 @@ class _TwoRationale(Method):
         self.content_attention = MaskAttention(d)
         self.ca_content_2, self.ca_content_3 = CrossAttention(d), CrossAttention(d)
         self.ca_ftr_2, self.ca_ftr_3 = CrossAttention(d), CrossAttention(d)
+        self.fusion = ScoreFusion(bool(cfg.get("use_zs")))
 
     def _register(self, texts: List[str]) -> np.ndarray:
         return self.store.register(texts, max_len=self.cfg.get("max_len", 170), pad_full=True)
 
-    def _fuse(self, attn_content, expert_2, expert_3, mf_2, mf_3) -> Dict[str, torch.Tensor]:
+    def _fuse(self, attn_content, expert_2, expert_3, mf_2, mf_3, data, idx) -> Dict[str, torch.Tensor]:
         w2, w3 = self.score_mapper_2(mf_2), self.score_mapper_3(mf_3)
         feats = torch.stack([attn_content, w2 * expert_2, w3 * expert_3], dim=1)
         final, _ = self.aggregator(feats)
-        return {"prob": torch.sigmoid(self.mlp(final).squeeze(-1)), "feature": final,
+        z = self.fusion(self.mlp(final).squeeze(-1), data, idx)
+        return {"prob": torch.sigmoid(z), "feature": final,
                 "content_feature": attn_content, "gate": torch.cat([w2, w3], dim=1),
                 "hard_2": self.hard_mlp_2(mf_2).squeeze(-1), "hard_3": self.hard_mlp_3(mf_3).squeeze(-1)}
 
@@ -115,6 +145,7 @@ class ARG(_TwoRationale):
             "pred3": np.array([x[1] for x in cs], dtype=np.int64),
             "acc2": np.array([x[2] for x in td], dtype=np.float32),
             "acc3": np.array([x[2] for x in cs], dtype=np.float32),
+            "zs": zs_logit(items),
         }
 
     def forward(self, data, idx):
@@ -127,7 +158,7 @@ class ARG(_TwoRationale):
         mf_2 = self.ca_ftr_2(hc, h2, m2)[0].mean(1)
         mf_3 = self.ca_ftr_3(hc, h3, m3)[0].mean(1)
         attn_content, _ = self.content_attention(hc, mc)
-        out = self._fuse(attn_content, expert_2, expert_3, mf_2, mf_3)
+        out = self._fuse(attn_content, expert_2, expert_3, mf_2, mf_3, data, idx)
         # official: the judgment predictor pools the rationale without a padding mask
         out["simple_2"] = self.simple_mlp_2(self.simple_attn_2(h2)[0])
         out["simple_3"] = self.simple_mlp_3(self.simple_attn_3(h3)[0])
@@ -161,6 +192,7 @@ class FactGuard(_TwoRationale):
             "y_llm": y_llm,
             # an undecided LLM judgment ("other") gives an uninformative usability target
             "y_llm_soft": np.where(y_llm == 2, 0.5, y_llm).astype(np.float32),
+            "zs": zs_logit(items),
         }
 
     def forward(self, data, idx):
@@ -174,7 +206,7 @@ class FactGuard(_TwoRationale):
         mf_2 = self.ca_ftr_2(hc, hr, mcc)[0].mean(1)
         mf_3 = self.ca_ftr_3(hc, hr, mr)[0].mean(1)
         attn_content, _ = self.content_attention(hn, mn)
-        out = self._fuse(attn_content, expert_2, expert_3, mf_2, mf_3)
+        out = self._fuse(attn_content, expert_2, expert_3, mf_2, mf_3, data, idx)
         out["simple_2"] = self.simple_mlp_2(self.simple_attn_2(hc)[0])
         out["simple_3"] = self.simple_mlp_3(self.simple_attn_3(hr)[0])
         return out
