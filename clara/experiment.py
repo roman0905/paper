@@ -55,15 +55,16 @@ def resolve(method: str, lang: str, model: Optional[Dict[str, Any]] = None,
 
 class Session:
     def __init__(self, dataset: Dataset, encoder_path: Optional[str] = None, device: str = "cuda",
-                 log=print):
+                 log=print, live: bool = False):
         self.ds = dataset
         self.device = torch.device(device)
         self.encoder_path = encoder_path or ENCODER[dataset.lang]
-        self.store = FrozenPrefix(self.encoder_path, device=device)
+        self.store = FrozenPrefix(self.encoder_path, device=device, live=live)
         self.log = log
 
     # -- construction -------------------------------------------------------------------
-    def _build(self, method: str, model_cfg: Dict[str, Any], teacher: Optional[Method] = None) -> Method:
+    def _build(self, method: str, model_cfg: Dict[str, Any], teacher: Optional[Method] = None,
+               targets: Optional[Dict[Any, Any]] = None) -> Method:
         if method == "bert":
             return TextOnly(model_cfg, self.store, self.ds.lang)
         if method == "arg":
@@ -76,7 +77,7 @@ class Session:
             return CLARA(model_cfg, self.store, self.ds.lang)
         if method == "clara_d":
             from clara.models.student import CLARAStudent
-            return CLARAStudent(model_cfg, self.store, self.ds.lang, teacher)
+            return CLARAStudent(model_cfg, self.store, self.ds.lang, teacher, targets)
         raise KeyError(method)
 
     def _eval_items(self, spec: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -112,8 +113,8 @@ class Session:
         result: Dict[str, Any] = {"dataset": self.ds.name, "llm": self.ds.llm, "method": method,
                                   "seed": seed, "encoder": os.path.basename(self.encoder_path)}
         set_seed(seed)
-        teacher = None
-        if method in TEACHER:
+        teacher, targets = None, None
+        if method in TEACHER and not cfg["model"].get("no_teacher"):
             tcfg = resolve(TEACHER[method], lang, teacher_model, teacher_train)
             tcfg["train"]["seed"] = seed
             teacher = self._build(TEACHER[method], tcfg["model"])
@@ -122,11 +123,12 @@ class Session:
                                  "metrics": {s: evaluate(predict(teacher, tdata[s])) for s in ("val", "test")}}
             self.log("  teacher test macF1 {:.4f}".format(result["teacher"]["metrics"]["test"]["macf1"]))
             if method == "clara_d":
-                teacher.cache_targets(tdata)
+                from clara.models.student import teacher_targets
+                targets = teacher_targets(teacher, tdata["train"], splits["train"])
             del tdata
             set_seed(seed)
 
-        m = self._build(method, cfg["model"], teacher)
+        m = self._build(method, cfg["model"], teacher, targets)
         data, summary = self._fit_one(m, splits, cfg["train"])
         preds = {s: predict(m, data[s]) for s in splits if s != "train"}
         result.update({

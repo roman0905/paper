@@ -12,6 +12,8 @@ td / cs      perspective-specific zero-shot CoT rationales, prompt wording follo
              same LLM that CLARA uses
 tc           topic-content extraction, prompt taken from the FactGuard repository
 zs / cot     plain zero-shot and zero-shot CoT veracity prediction (LLM-only baselines)
+style        fact-preserving style transfer of test items (style-attack robustness)
+tamper       one minimal factual edit in a given sentence (localisation benchmark)
 """
 import json
 import re
@@ -428,6 +430,102 @@ def build_tc(content: str, lang: str) -> Dict[str, Any]:
 
 
 # --------------------------------------------------------------------------------------
+# Controlled test-set perturbations (robustness / localisation experiments)
+#   style   fact-preserving style transfer: fake news -> wire-service style, real news ->
+#           tabloid style (the style-attack setting of SheepDog, Wu et al., KDD 2024)
+#   tamper  one minimal factual edit in one given sentence of a real news item, so that the
+#           position of the falsehood is known
+# --------------------------------------------------------------------------------------
+
+STYLE_SYSTEM = {"zh": "你是一名资深编辑。", "en": "You are a senior news editor."}
+STYLE_NAME = {
+    "zh": {"authoritative": "官方媒体通稿（如新华社、人民日报官方微博）那种客观、严谨、克制的",
+           "sensational": "自媒体营销号、标题党那种夸张、煽情、口语化的"},
+    "en": {"authoritative": "the objective, restrained and professional style of a wire service such as Reuters or the Associated Press",
+           "sensational": "the sensational, emotional, clickbait style of a tabloid"},
+}
+STYLE_USER = {
+    "zh": """请把下面这条消息改写成{style}文风。
+要求：
+1. 保留原文的全部事实信息（人物、机构、时间、地点、数字、事件、引述内容），不得增加、删除或修改任何事实；
+2. 只改变措辞、语气和表达方式；
+3. 篇幅与原文相近；
+4. 只输出改写后的文本，不要任何解释。
+
+原文：
+{content}""",
+    "en": """Rewrite the following message in {style}.
+Requirements:
+1. Keep every piece of factual information of the original (people, organisations, times, places, numbers, events, quoted statements); do not add, remove or change any fact.
+2. Change only the wording, tone and manner of expression.
+3. Keep the length close to the original.
+4. Output the rewritten text only, without any explanation.
+
+Original:
+{content}""",
+}
+
+
+def style_target(label: int) -> str:
+    """Fake news is dressed up as authoritative reporting, real news as tabloid content."""
+    return "authoritative" if int(label) == 1 else "sensational"
+
+
+def build_style(content: str, lang: str, item: Dict[str, Any]) -> Dict[str, Any]:
+    target = item.get("style_target") or style_target(item["label"])
+    return {"system": STYLE_SYSTEM[lang],
+            "user": STYLE_USER[lang].format(style=STYLE_NAME[lang][target], content=content),
+            "prefix": "", "schema": None, "meta": {"style": target}}
+
+
+TAMPER_SYSTEM = {
+    "zh": "你是一名事实核查研究助手，正在为虚假信息检测模型构造受控的测试样本。",
+    "en": "You are a research assistant in fact-checking who builds controlled test cases for misinformation detectors.",
+}
+TAMPER_USER = {
+    "zh": """下面给出一条消息以及其中的一句话。请对这句话做一处最小的事实性改动，使它变成与原文事实不符的陈述，例如：把肯定改为否定、修改数字或时间、替换人物/机构/地点、颠倒因果或结果。
+要求：
+1. 只改动一处，其余措辞保持不变，改动后的句子通顺自然，长度与原句相近；
+2. 不要添加“据说”“可能”等模糊词，不要改变句子的标点结构；
+3. 只输出改动后的这一句话，不要任何解释。
+
+消息全文：
+{content}
+
+需要改动的句子：
+{sentence}""",
+    "en": """Below are a message and one of its sentences. Make one minimal factual edit to this sentence so that it states something that contradicts the original facts, e.g. turn an affirmation into a negation, change a number or a date, replace a person / organisation / place, or reverse a cause or an outcome.
+Requirements:
+1. Edit exactly one thing; keep the rest of the wording unchanged; the result must read naturally and be about as long as the original sentence.
+2. Do not add hedges such as "reportedly" or "may", and do not change the punctuation structure of the sentence.
+3. Output the edited sentence only, without any explanation.
+
+Full message:
+{content}
+
+Sentence to edit:
+{sentence}""",
+}
+
+
+def build_tamper(content: str, lang: str, item: Dict[str, Any]) -> Dict[str, Any]:
+    sents = item["sents"]
+    j = int(item["tamper_sent"])
+    return {"system": TAMPER_SYSTEM[lang],
+            "user": TAMPER_USER[lang].format(content=content, sentence=sents[j].strip()),
+            "prefix": "", "schema": None, "meta": {"sent": j}}
+
+
+def clean_generation(text: str) -> str:
+    """Strip wrappers that chat models like to add around a rewritten text."""
+    t = (text or "").strip()
+    t = re.sub(r"^(改写后(的文本)?|改动后(的句子)?|Rewritten( text)?|Edited sentence)\s*[:：]\s*", "", t, flags=re.I)
+    if len(t) >= 2 and t[0] in "\"“「'" and t[-1] in "\"”」'":
+        t = t[1:-1].strip()
+    return t
+
+
+# --------------------------------------------------------------------------------------
 # registry
 # --------------------------------------------------------------------------------------
 
@@ -439,6 +537,8 @@ TASKS = {
     "cot": (400, 0.0, False),
     "zs": (4, 0.0, True),
     "tc": (512, 0.2, False),
+    "style": (700, 0.3, False),
+    "tamper": (200, 0.3, False),
 }
 
 
@@ -451,4 +551,8 @@ def build(task: str, content: str, lang: str, item_id: Any, **kw: Any) -> Dict[s
         return build_zs(content, lang)
     if task == "tc":
         return build_tc(content, lang)
+    if task == "style":
+        return build_style(content, lang, kw["item"])
+    if task == "tamper":
+        return build_tamper(content, lang, kw["item"])
     raise KeyError(task)

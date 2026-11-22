@@ -59,6 +59,30 @@ def session():
 FAST = {"epochs": 2, "batch_size": 16}
 
 
+def test_cache_matches_live():
+    """Cached hidden states equal the on-the-fly frozen forward (eval mode), across blocks.
+
+    The cache is stored in float16, so agreement is up to its quantisation (relative 2^-11)."""
+    from clara.encoder import FrozenPrefix
+
+    rng = random.Random(1)
+    a = [_text(rng, rng.randint(2, 12)) for _ in range(9)]
+    b = [_text(rng, rng.randint(2, 12)) for _ in range(9)]
+    outs = []
+    for live in (False, True):
+        st = FrozenPrefix(ENCODER["zh"], device="cpu", live=live)
+        i1 = st.register(a, max_len=32)
+        st.build()
+        i2 = st.register(a, b, max_len=40)                 # second block: text pairs
+        i3 = st.register(b, max_len=24, pad_full=True)     # padded to max_len
+        st.build()
+        ids = torch.as_tensor(np.concatenate([i1[:3], i2[:3], i3[:3], i1[3:5]]))
+        outs.append(st.fetch(ids))
+    (h0, m0), (h1, m1) = outs
+    assert torch.equal(m0, m1) and h0.shape == h1.shape
+    assert torch.allclose(h0, h1, rtol=2e-3, atol=2e-3), float((h0 - h1).abs().max())
+
+
 def _check(res, n_test=16):
     m = res["metrics"]["test"]
     assert 0.0 <= m["macf1"] <= 1.0 and np.isfinite(m["ece"])
@@ -104,6 +128,22 @@ def test_clara_variants(session, model):
         off = data["off"].numpy()
         nor = np.array([1 - np.prod(1 - pr["inst_p"][off[i]:off[i + 1]]) for i in range(16)])
         assert np.allclose(nor, pr["p_bag"], atol=1e-4)
+
+
+@pytest.mark.parametrize("model", [{}, {"kd_inst": 0.0}, {"no_teacher": True}, {"init_from_teacher": False}])
+def test_student(session, model):
+    res = session.run("clara_d", seed=1, model=model, train=FAST, teacher_train=FAST, keep=True)
+    _check(res)
+    data, pr = res["_data"], res["_preds"]["test"]
+    # one holistic unit plus one unit per sentence
+    n_units = sum(1 + len(it["sents"]) for it in session.ds.split("test"))
+    assert pr["inst_p"].shape == (n_units,)
+    if model.get("no_teacher"):
+        assert "teacher" not in res and float(data["train"]["w_item"].sum()) == 0
+    else:
+        assert "teacher" in res
+        assert float(data["train"]["w_item"].sum()) == 48 and float(data["train"]["w_inst"].sum()) > 0
+        assert float(data["test"]["w_item"].sum()) == 0      # targets exist for training items only
 
 
 def test_gate_targets(session):

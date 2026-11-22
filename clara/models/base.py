@@ -41,6 +41,11 @@ class Method(nn.Module):
         """Per-instance tensors (flattened over the batch, item order preserved)."""
         return {}
 
+    def train(self, mode: bool = True):
+        super().train(mode)
+        self.store.set_training(mode)
+        return self
+
     def encode(self, top: nn.Module, ids: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         hidden, mask = self.store.fetch(ids)
         return top(hidden, mask), mask

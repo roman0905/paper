@@ -29,10 +29,13 @@ def load_items(path):
             data = json.load(f)
         else:
             data = [json.loads(line) for line in f if line.strip()]
+    if isinstance(data, dict) and "items" in data:      # a file written by build_dataset.py
+        data = data["items"]
     items = []
     for i, d in enumerate(data):
-        iid = d.get("source_id", d.get("id", i))
-        items.append({"id": iid, "content": d["content"]})
+        d = dict(d)
+        d["id"] = d.get("source_id", d.get("id", i))
+        items.append(d)
     return items
 
 
@@ -77,6 +80,7 @@ def main():
     ap.add_argument("--spec", action="append", required=True,
                     help="NAME=PATH:LANG, e.g. ARG-CN.train=data/ARG-CN/train.json:zh")
     ap.add_argument("--limit", type=int, default=0, help="only the first N items of every input")
+    ap.add_argument("--split", default=None, help="keep only items of this split (dataset files)")
     ap.add_argument("--chunk", type=int, default=768)
     ap.add_argument("--max-claims", type=int, default=6)
     ap.add_argument("--gpu-util", type=float, default=0.92)
@@ -113,8 +117,12 @@ def main():
         return SamplingParams(**kw)
 
     def run(task, batch_items, lang, **build_kw):
-        builds = [T.build(task, it["content"][:args.max_content_chars], lang, it["id"], **build_kw)
-                  for it in batch_items]
+        if task in ("style", "tamper"):
+            builds = [T.build(task, it["content"][:args.max_content_chars], lang, it["id"], item=it)
+                      for it in batch_items]
+        else:
+            builds = [T.build(task, it["content"][:args.max_content_chars], lang, it["id"], **build_kw)
+                      for it in batch_items]
         prompts = [render(b) for b in builds]
         sps = [sampling(task, b) for b in builds]
         outs = llm.generate(prompts, sps, use_tqdm=False)
@@ -124,6 +132,8 @@ def main():
         name, rest = spec.split("=", 1)
         path, lang = rest.rsplit(":", 1)
         items = load_items(path)
+        if args.split:
+            items = [it for it in items if it.get("split") == args.split]
         if args.limit:
             items = items[:args.limit]
         for task in args.tasks:
@@ -158,6 +168,9 @@ def main():
                         elif task in ("td", "cs", "cot"):
                             rec["pred"] = T.parse_binary(c.text)
                             rec["rationale"] = T.clean_rationale(c.text, b["prefix"])
+                        elif task in ("style", "tamper"):
+                            rec["text"] = T.clean_generation(c.text)
+                            rec.update(b["meta"])
                         elif task == "zs":
                             rec["pred"] = T.parse_binary(c.text)
                             rec["p_fake"] = T.binary_soft(to_tokens(c))
