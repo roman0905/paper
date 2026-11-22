@@ -1,0 +1,36 @@
+# 数据集（ARG 数据需向原作者申请，禁止再分发）与第三方代码
+data/
+third_party/
+
+# 运行产物：LLM 生成缓存、checkpoint、日志（由受限数据派生或体积过大）
+outputs/
+*.pt
+*.pkl
+*.bin
+*.safetensors
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ipynb_checkpoints/
+
+# LaTeX 中间文件
+paper/**/*.aux
+paper/**/*.log
+paper/**/*.out
+paper/**/*.toc
+paper/**/*.bbl
+paper/**/*.blg
+paper/**/*.fls
+paper/**/*.fdb_latexmk
+paper/**/*.synctex.gz
+paper/**/*.xdv
+paper/**/*.lof
+paper/**/*.lot
+
+# 编辑器/系统
+.vscode/
+.idea/
+.DS_Store
+.claude/
