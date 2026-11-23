@@ -287,6 +287,8 @@ def tab_style(A):
                 cells += [pm(r["orig"]), pm(r["style"], bold=abs(r["style"]["mean"] - best[D]) < 1e-12),
                           "{:+.2f}".format(100 * r["delta"]["mean"])]
         if any(c != "--" for c in cells):
+            if b == "bert_tc":
+                out.append(r"\midrule")
             out.append(NAME[b] + " & " + " & ".join(cells) + r" \\")
     out += [r"\bottomrule", r"\end{tabular}"]
     return "\n".join(out) + "\n"
@@ -377,6 +379,24 @@ def tab_lodo(A):
     out.append(r"\midrule")
     avg = L["_macro_avg"]
     out.append("平均 & & & " + " & ".join(pct(avg[b]) if b in avg else "--" for b in bases) + r" \\")
+    out += [r"\bottomrule", r"\end{tabular}"]
+    return "\n".join(out) + "\n"
+
+
+def tab_llm2(A):
+    order = ["bert_zs", "arg", "factguard", "clara"]
+    out = [r"\begin{tabular}{lcccc}", r"\toprule",
+           r" & \multicolumn{2}{c}{" + DS_LABEL["ARG-CN"] + r"} & \multicolumn{2}{c}{" + DS_LABEL["ARG-EN"] + r"} \\",
+           r"\cmidrule(lr){2-3}\cmidrule(lr){4-5}", r"方法 & Qwen2.5-7B & Qwen3-8B & Qwen2.5-7B & Qwen3-8B \\", r"\midrule"]
+    out.append("零样本判断（不训练） & " + " & ".join(
+        "{} & {}".format(pct(A[D]["llm_only"]["zero-shot"]["test"]["macf1"]),
+                         pct(A[D]["llm2"]["zero_shot"]) if "zero_shot" in A[D]["llm2"] else "--") for D in DS) + r" \\")
+    for b in order:
+        cells = []
+        for D in DS:
+            r = A[D]["llm2"].get(b)
+            cells += [pm(r["first"]), pm(r["second"])] if r else ["--", "--"]
+        out.append(NAME[b] + " & " + " & ".join(cells) + r" \\")
     out += [r"\bottomrule", r"\end{tabular}"]
     return "\n".join(out) + "\n"
 
@@ -787,7 +807,8 @@ def main():
                      ("style_llm", tab_style_llm), ("style", tab_style), ("style_recall", tab_style_recall),
                      ("loc", tab_loc), ("loc_type", tab_loc_type), ("tamper", tab_tamper), ("lodo", tab_lodo),
                      ("selective", tab_selective), ("cost", tab_cost), ("train_cost", tab_train_cost),
-                     ("grid", tab_grid), ("sig", tab_sig), ("live", tab_live), ("cases", tab_cases)]:
+                     ("grid", tab_grid), ("sig", tab_sig), ("live", tab_live), ("cases", tab_cases),
+                     ("llm2", tab_llm2)]:
         table(name, fn, A)
     write_prompts()
     figure("noise", fig_noise, A)

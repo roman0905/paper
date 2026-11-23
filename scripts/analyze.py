@@ -418,6 +418,61 @@ def cost_section(D, llm):
     return out
 
 
+def llm2_section(D, chosen, tag2, runs1):
+    """The LLM-dependent methods with a second analyst LLM, at the learning rates selected with
+    the first one (seeds 1-3; the first-LLM numbers are restricted to the same seeds)."""
+    runs2 = load_runs("{}.{}".format(D, tag2))
+    if not runs2:
+        raise Missing("no runs for the second LLM")
+    out = {"_llm": tag2}
+    for base in ("bert_zs", "arg", "factguard", "clara"):
+        name = chosen.get(base)
+        if name in runs2:
+            seeds = runs2[name]
+            first = {s: r for s, r in runs1[name].items() if s in seeds}
+            out[base] = {"second": ms(r["metrics"]["test"]["macf1"] for r in seeds.values()),
+                         "first": ms(r["metrics"]["test"]["macf1"] for r in first.values())}
+            for key in ("noise100", "unit100"):
+                if all(key in r["metrics"] for r in seeds.values()):
+                    out[base]["second_" + key] = ms(r["metrics"][key]["macf1"] for r in seeds.values())
+    path = os.path.join(ROOT, "results", "llm_only", "{}.{}.json".format(D, tag2))
+    if os.path.exists(path):
+        rows = json.load(open(path, encoding="utf-8"))["rows"]
+        out["zero_shot"] = rows["zero-shot"]["test"]["macf1"]
+        if "zero-shot, soft P(fake) @0.5" in rows:
+            out["zero_shot_auc"] = rows["zero-shot, soft P(fake) @0.5"]["test"]["auc"]
+    return out
+
+
+def derived_section(res):
+    """Differences quoted in the prose, computed here so that no number is derived by hand."""
+    out = {}
+    main, noise, abl = res.get("main", {}), res.get("noise", {}), res.get("ablation", {})
+
+    def put(key, fn):
+        try:
+            out[key] = float(fn())
+        except (KeyError, TypeError):
+            pass
+
+    bert = lambda: main["bert"]["macf1"]
+    put("no_relevance_gap", lambda: bert() - abl["no_relevance"]["noise100"]["mean"])
+    put("clara_item100_gap", lambda: bert() - noise["clara"]["item"]["100"]["mean"])
+    put("lora_minus_clara", lambda: main["lora"]["macf1"] - main["clara"]["macf1"])
+    put("lora_minus_bert", lambda: main["lora"]["macf1"] - bert())
+    put("clara_minus_bert", lambda: main["clara"]["macf1"] - bert())
+    put("bertzs_minus_bert", lambda: main["bert_zs"]["macf1"] - bert())
+    for b in ("arg", "factguard", "clara"):
+        put(b + "_item100_drop", lambda b=b: noise[b]["item"]["0"]["mean"] - noise[b]["item"]["100"]["mean"])
+        put(b + "_unit100_drop", lambda b=b: noise[b]["unit"]["0"]["mean"] - noise[b]["unit"]["100"]["mean"])
+    for b in ("clara_d", "arg_d", "factguard_d"):
+        put(b + "_minus_bert", lambda b=b: main[b]["macf1"] - bert())
+    put("clarad_minus_clara", lambda: main["clara_d"]["macf1"] - main["clara"]["macf1"])
+    if not out:
+        raise Missing("nothing to derive")
+    return out
+
+
 def data_section(ds):
     out = {}
     for sp in SPLITS:
@@ -447,6 +502,7 @@ def data_section(ds):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--llm", default="qwen25")
+    ap.add_argument("--llm2", default="qwen3", help="tag of the second analyst LLM (robustness check)")
     ap.add_argument("--strict", action="store_true")
     ap.add_argument("--out", default=os.path.join(ROOT, "results", "analysis.json"))
     args = ap.parse_args()
@@ -497,6 +553,8 @@ def main():
         section("lambda_gate", lambda: sweep_section(runs, chosen, r"clara-lgate([\d.]+)$", "lambda_gate"))
         section("lodo", lambda: lodo_section(D, args.llm, chosen))
         section("live", lambda: live_section(D, args.llm, runs, chosen))
+        section("llm2", lambda: llm2_section(D, chosen, args.llm2, runs))
+        section("derived", lambda: derived_section(res))
 
     os.makedirs(os.path.dirname(args.out), exist_ok=True)
     with open(args.out, "w", encoding="utf-8") as f:
