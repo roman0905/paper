@@ -277,8 +277,9 @@ def test_path_evals_and_analysis(session, tmp_path, monkeypatch):
               open(occ_path, "w", encoding="utf-8"), ensure_ascii=False)
 
     noise = {"name": "noise40", "transform": "replace", "rate": 0.4, "seed": 0}
+    cross = {"name": "cross", "transform": "cross", "path": tam_path}
     specs = {"bert": ("bert", {}, [{"name": "tamper", "path": tam_path}, {"name": "occl", "path": occ_path}]),
-             "clara": ("clara", {}, [{"name": "tamper", "path": tam_path}, noise]),
+             "clara": ("clara", {}, [{"name": "tamper", "path": tam_path}, noise, cross]),
              "arg": ("arg", {"rationale_source": "llm"}, [noise]),
              "clara_d": ("clara_d", {}, [{"name": "tamper", "path": tam_path}])}
     runs = {}
@@ -305,6 +306,8 @@ def test_path_evals_and_analysis(session, tmp_path, monkeypatch):
                                                "CLARA-D": ("clara_d", runs["clara_d"])}, only=half)
     assert sub["_n_items"] == 6 and all(sub[k]["n"] == 6 for k in ("CLARA", "BERT + occlusion", "CLARA-D"))
 
+    cr = analysis.cross_relevance(session.ds, ds_t, "toy", "clara", runs["clara"])
+    assert 0.0 <= cr["cross/r_other_claims"] <= 1.0 and 0.0 <= cr["tamper/r_other_claims"] <= 1.0
     det = analysis.tamper_detection(ds_t, "toy", "clara", runs["clara"])
     assert 0.0 <= det["pairwise_acc"] <= 1.0
     gate = analysis.gate_analysis(session.ds, "toy", "clara", runs["clara"])

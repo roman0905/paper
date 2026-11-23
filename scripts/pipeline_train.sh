@@ -40,8 +40,11 @@ lora)        # LoRA fine-tuned 7B classifier
     EV=""
     for K in style tamper; do F=outputs/datasets/$D-$K.$TAG.json; [ -f $F ] && EV="$EV --eval $K=$F"; done
     F=outputs/datasets/$D-occl.none.json; [ -f $F ] && EV="$EV --eval occl=$F"
+    # same effective batch size (16) for both datasets; the longer English inputs need a smaller
+    # micro-batch to fit the backward pass of the 7B model into 24 GB
+    MB="--micro-batch 4 --accum 4"; [ $D = ARG-EN ] && MB="--micro-batch 2 --accum 8"
     for S in 1 2 3; do
-      step lora_$D.log $PY scripts/lora_baseline.py --dataset outputs/datasets/$D.$TAG.json --seed $S --lr 1e-4 $EV
+      step lora_$D.log $PY scripts/lora_baseline.py --dataset outputs/datasets/$D.$TAG.json --seed $S --lr 1e-4 $MB $EV
     done
   done ;;
 ablation)    # CLARA ablations at the learning rate selected on validation (5 seeds zh, 3 seeds en)
@@ -70,8 +73,13 @@ extra)       # number of claims (both languages); sensitivity to the a-priori we
   done
   LR=$(sel ARG-CN.$TAG clara) && \
   run extra_ARG-CN.log --dataset outputs/datasets/ARG-CN.$TAG.json --sweep sensitivity --lr $LR --seeds 1 2 3 ;;
-live)        # protocol check: recompute the frozen layers every step (no cache, no mixed precision)
-  NAMES=$(sel ARG-CN.$TAG --names bert arg_gpt clara) && \
+live)        # protocol check: recompute the frozen layers every step (no cache, no mixed precision);
+             # ARG with the released GPT-3.5 rationales at the learning rate of its official script
+  NAMES=$(sel ARG-CN.$TAG --names bert) && \
+  step live.log $PY scripts/run.py --live --dataset outputs/datasets/ARG-CN.$TAG.json --sweep main \
+      --only $NAMES arg_gpt@lr2e-05 --tag ARG-CN.$TAG-live --seeds 1 2 3 ;;
+live_clara)  # the same check for CLARA (slow; not part of the default stage list)
+  NAMES=$(sel ARG-CN.$TAG --names clara) && \
   step live.log $PY scripts/run.py --live --dataset outputs/datasets/ARG-CN.$TAG.json --sweep main \
       --only $NAMES --tag ARG-CN.$TAG-live --seeds 1 2 3 ;;
 *) note "unknown stage $STAGE" ;;

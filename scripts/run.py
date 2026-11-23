@@ -55,6 +55,8 @@ def main():
                     help="recompute the frozen encoder layers every step instead of caching them")
     ap.add_argument("--amp", action="store_true", help="mixed-precision training of the top layers")
     ap.add_argument("--perturb", action="store_true", help="also evaluate on the style / tamper sets")
+    ap.add_argument("--cross", action="store_true",
+                    help="also evaluate tampered texts paired with the analysis of the original item")
     ap.add_argument("--holdout", default=None,
                     help="leave-one-domain-out: train/val on the other domains, test on this one")
     ap.add_argument("--set", nargs="*", default=[], metavar="KEY=VALUE",
@@ -91,6 +93,9 @@ def main():
             e["teacher_train"] = dict(e.get("teacher_train") or {}, amp=True)
         if args.perturb:
             e["evals"] = list(e.get("evals") or []) + perturb_evals(ds, e)
+        if args.cross:
+            path = os.path.join(ROOT, "outputs", "datasets", "{}-tamper.{}.json".format(ds.name, ds.llm))
+            e["evals"] = list(e.get("evals") or []) + [{"name": "cross", "transform": "cross", "path": path}]
 
     todo = []
     for e in exps:

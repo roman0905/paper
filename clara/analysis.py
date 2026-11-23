@@ -244,6 +244,51 @@ def relevance_under_noise(ds: Dataset, tag: str, name: str, runs: Runs, lang: st
     return {k: float(np.mean(v)) for k, v in acc.items()}
 
 
+def cross_relevance(ds: Dataset, ds_tamper: Dataset, tag: str, name: str, runs: Runs) -> Dict[str, float]:
+    """Relevance gate on on-topic but locally unfaithful analyses.
+
+    "cross" = tampered text with the analysis of the original text.  Claims whose source sentence
+    was edited no longer agree with the text; all other claims still do.  "tamper" = the same
+    tampered text with its own analysis (reference)."""
+    from clara.corrupt import LLM_FIELDS
+
+    by_id = {it["id"]: it for it in ds.split("test")}
+    crossed = []
+    for it in ds_tamper.split("test"):
+        o, it = by_id[it["orig_id"]], dict(it)
+        for f in LLM_FIELDS:
+            if f in o:
+                it[f] = o[f]
+        crossed.append(it)
+    acc: Dict[str, List[float]] = {}
+    for seed, r in sorted(runs.items()):
+        pred = load_preds(tag, name, seed)
+        if pred is None or "cross/inst_r" not in pred:
+            continue
+        cfg = r["config"]["model"]
+        for split, items in (("cross", crossed), ("tamper", ds_tamper.split("test"))):
+            T = instance_table(ds_tamper, items, pred, split, cfg)
+            gold = np.array([items[i]["tamper_sent"] for i in T["item"]])
+            claim = T["type"] != "overall"
+            hit = claim & (T["sent"] == gold)
+            acc.setdefault(split + "/r_edited_sentence", []).append(float(T["r"][hit].mean()))
+            acc.setdefault(split + "/r_other_claims", []).append(float(T["r"][claim & ~hit].mean()))
+            acc.setdefault(split + "/r_overall", []).append(float(T["r"][~claim].mean()))
+            acc.setdefault(split + "/p_edited_sentence", []).append(float(T["p"][hit].mean()))
+            acc.setdefault(split + "/p_other_claims", []).append(float(T["p"][claim & ~hit].mean()))
+            acc.setdefault(split + "/n_edited", []).append(float(hit.sum()))
+        Tc = instance_table(ds_tamper, crossed, pred, "cross", cfg)
+        goldc = np.array([crossed[i]["tamper_sent"] for i in Tc["item"]])
+        cl = Tc["type"] != "overall"
+        # AUC of r for "this claim still agrees with the text" among the claims of the crossed set
+        acc.setdefault("cross/auc_r_unfaithful", []).append(_auc(~(Tc["sent"] == goldc)[cl], Tc["r"][cl]))
+        acc.setdefault("prob/cross", []).append(float(pred["cross/prob"].mean()))
+        acc.setdefault("prob/tamper", []).append(float(pred["tamper/prob"].mean()))
+    if not acc:
+        return {}
+    return {k: float(np.nanmean(v)) for k, v in acc.items()}
+
+
 def gate_under_noise(tag: str, name: str, runs: Runs, kind: str,
                      rates: Sequence[int] = (20, 40, 60, 80)) -> Dict[str, Any]:
     """Mean gate value on items whose LLM outputs were swapped vs untouched items, and how well

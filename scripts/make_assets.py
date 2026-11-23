@@ -383,6 +383,24 @@ def tab_lodo(A):
     return "\n".join(out) + "\n"
 
 
+def tab_distill(A):
+    rows = [("bert", "BERT（同样的 3 个种子）"), ("arg_d", "ARG-D"), ("factguard_d", "FactGuard-D"),
+            ("clara_d", r"\student{}"), ("clara_d-no_inst", r"\student{}：去掉实例级蒸馏"),
+            ("clara_d-no_teacher", r"\student{}：无教师（仅句子级 MIL）")]
+    out = [r"\begin{tabular}{lcccc}", r"\toprule",
+           r" & \multicolumn{2}{c}{" + DS_LABEL["ARG-CN"] + r"} & \multicolumn{2}{c}{" + DS_LABEL["ARG-EN"] + r"} \\",
+           r"\cmidrule(lr){2-3}\cmidrule(lr){4-5}", r"模型 & 学生 & 其教师 & 学生 & 其教师 \\", r"\midrule"]
+    for key, label in rows:
+        cells = []
+        for D in DS:
+            r = A[D]["distill"].get(key)
+            cells += [pm(r["test"]) if r else "--", pm(r["teacher"]) if r and "teacher" in r else "--"]
+        if any(c != "--" for c in cells):
+            out.append(label + " & " + " & ".join(cells) + r" \\")
+    out += [r"\bottomrule", r"\end{tabular}"]
+    return "\n".join(out) + "\n"
+
+
 def tab_llm2(A):
     order = ["bert_zs", "arg", "factguard", "clara"]
     out = [r"\begin{tabular}{lcccc}", r"\toprule",
@@ -439,6 +457,13 @@ def tab_cost(A):
             cells += ["{:.0f}".format(sum(t[k]["prompt"] for k in tasks)), "{:.0f}".format(sum(t[k]["completion"] for k in tasks)),
                       "{:.0f}".format(1000 * sum(s[k] for k in tasks)) if all(k in s for k in tasks) else "--"]
         out.append("{} & {} & ".format(label, len(tasks)) + " & ".join(cells) + r" \\")
+    if all("lora_cost" in A[D] for D in DS):
+        cells = []
+        for D in DS:
+            cells += ["{:.0f}".format(A[D]["cost"]["tokens"]["zs"]["prompt"]), "0",
+                      "{:.0f}".format(1000 * A[D]["lora_cost"]["eval_seconds_per_item"])]
+        out.append(r"\midrule")
+        out.append("LoRA-LLM（一次前向，不生成文本）$^\\ddagger$ & 1 & " + " & ".join(cells) + r" \\")
     out += [r"\bottomrule", r"\end{tabular}"]
     return "\n".join(out) + "\n"
 
@@ -500,12 +525,14 @@ def tab_sig(A):
 
 def tab_live(A):
     L = A["ARG-CN"]["live"]
-    out = [r"\begin{tabular}{lcccc}", r"\toprule", r"方法 & 缓存（macF1） & 每步重算（macF1） & 缓存（秒/次） & 重算（秒/次） \\", r"\midrule"]
+    out = [r"\begin{tabular}{lccccc}", r"\toprule",
+           r" & \multicolumn{3}{c}{macro-F1（\%）} & \multicolumn{2}{c}{秒/次} \\", r"\cmidrule(lr){2-4}\cmidrule(lr){5-6}",
+           r"方法 & 缓存+混合精度 & 缓存+全精度 & 每步重算 & 缓存+混合精度 & 每步重算 \\", r"\midrule"]
     for name, r in sorted(L.items()):
         base = name.split("@")[0]
-        out.append("{} & {} & {} & {:.0f} & {:.0f} \\\\".format(
-            NAME.get(base, base), pm(r["cached"]) if "cached" in r else "--", pm(r["live"]),
-            r.get("cached_seconds", float("nan")), r["live_seconds"]))
+        out.append("{} & {} & {} & {} & {} & {:.0f} \\\\".format(
+            NAME.get(base, base), pm(r["cached"]) if "cached" in r else "--", pm(r["fp32"]) if "fp32" in r else "--",
+            pm(r["live"]), "{:.0f}".format(r["cached_seconds"]) if "cached_seconds" in r else "--", r["live_seconds"]))
     out += [r"\bottomrule", r"\end{tabular}"]
     return "\n".join(out) + "\n"
 
@@ -808,7 +835,7 @@ def main():
                      ("loc", tab_loc), ("loc_type", tab_loc_type), ("tamper", tab_tamper), ("lodo", tab_lodo),
                      ("selective", tab_selective), ("cost", tab_cost), ("train_cost", tab_train_cost),
                      ("grid", tab_grid), ("sig", tab_sig), ("live", tab_live), ("cases", tab_cases),
-                     ("llm2", tab_llm2)]:
+                     ("llm2", tab_llm2), ("distill", tab_distill)]:
         table(name, fn, A)
     write_prompts()
     figure("noise", fig_noise, A)

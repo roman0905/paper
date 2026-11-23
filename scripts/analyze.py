@@ -369,17 +369,24 @@ def lodo_section(D, llm, chosen):
 
 
 def live_section(D, llm, runs, chosen):
+    """Protocol check: the same experiments (same seeds) trained in three ways -
+    cached + mixed precision (the protocol of the paper), cached + full precision, and with the
+    frozen layers recomputed in every step at full precision (what the official code does)."""
     live = load_runs("{}.{}-live".format(D, llm))
     if not live:
         raise Missing("no live-encoder runs")
+    fp32 = load_runs("{}.{}-fp32".format(D, llm))
     out = {}
     for name, seeds in live.items():
-        cached = {s: r for s, r in runs.get(name, {}).items() if s in seeds}
-        out[name] = {"live": ms(r["metrics"]["test"]["macf1"] for r in seeds.values()),
-                     "live_seconds": float(np.mean([r["seconds"] for r in seeds.values()]))}
-        if cached:
-            out[name]["cached"] = ms(r["metrics"]["test"]["macf1"] for r in cached.values())
-            out[name]["cached_seconds"] = float(np.mean([r["seconds"] for r in cached.values()]))
+        row = {"live": ms(r["metrics"]["test"]["macf1"] for r in seeds.values()),
+               "live_seconds": float(np.mean([r["seconds"] for r in seeds.values()])),
+               "seeds": sorted(seeds)}
+        for key, other in (("cached", runs.get(name, {})), ("fp32", fp32.get(name, {}))):
+            same = {s: r for s, r in other.items() if s in seeds}
+            if len(same) == len(seeds):
+                row[key] = ms(r["metrics"]["test"]["macf1"] for r in same.values())
+                row[key + "_seconds"] = float(np.mean([r["seconds"] for r in same.values()]))
+        out[name] = row
     return out
 
 
@@ -415,6 +422,53 @@ def cost_section(D, llm):
                 secs[cur[0]][0] += float(m.group(3))
                 secs[cur[0]][1] += cur[2]
     out["gen_seconds_per_item"] = {t: v[0] / v[1] for t, v in secs.items() if v[1]}
+    return out
+
+
+def lora_cost(runs, chosen):
+    """Inference cost of the fine-tuned LLM: time spent on the final predictions of a run divided
+    by the number of predicted items (plain batched forward passes, no generation)."""
+    seeds = need(runs, chosen.get("lora", "lora"))
+    per = []
+    for r in seeds.values():
+        n = sum(v for k, v in r["n_items"].items() if k != "train")
+        per.append((r["seconds"] - r["summary"]["train_seconds"]) / n)
+    return {"eval_seconds_per_item": float(np.mean(per)),
+            "train_seconds": float(np.mean([r["summary"]["train_seconds"] for r in seeds.values()]))}
+
+
+def cross_section(D, llm, ds, ds_tamper, chosen):
+    tag = "{}.{}-cross".format(D, llm)
+    runs = load_runs(tag)
+    name = chosen.get("clara")
+    if name not in runs:
+        raise Missing("no cross runs")
+    out = A.cross_relevance(ds, ds_tamper, tag, name, runs[name])
+    if not out:
+        raise Missing("no cross predictions")
+    out["n_seeds"] = len(runs[name])
+    return out
+
+
+def distill_section(runs, chosen):
+    """LLM-free students (3 seeds), their teachers in the same runs, and BERT on the same seeds."""
+    names = ["arg_d", "factguard_d", "clara_d", "clara_d-no_inst", "clara_d-no_teacher"]
+    out = {}
+    for n in names:
+        if n not in runs:
+            continue
+        seeds = runs[n]
+        row = {"test": ms(r["metrics"]["test"]["macf1"] for r in seeds.values()),
+               "val": ms(r["metrics"]["val"]["macf1"] for r in seeds.values()),
+               "auc": ms(r["metrics"]["test"]["auc"] for r in seeds.values())}
+        if all("teacher" in r for r in seeds.values()):
+            row["teacher"] = ms(r["teacher"]["metrics"]["test"]["macf1"] for r in seeds.values())
+        out[n] = row
+    if "clara_d" not in out:
+        raise Missing("no student runs")
+    bert = runs[chosen["bert"]]
+    same = {s: r for s, r in bert.items() if s in runs["clara_d"]}
+    out["bert"] = {"test": ms(r["metrics"]["test"]["macf1"] for r in same.values())}
     return out
 
 
@@ -531,6 +585,7 @@ def main():
 
         section("data", lambda: data_section(ds))
         section("cost", lambda: cost_section(D, args.llm))
+        section("lora_cost", lambda: lora_cost(runs, chosen))
         section("llm_only", lambda: json.load(open(os.path.join(ROOT, "results", "llm_only", tag + ".json"), encoding="utf-8"))["rows"])
         section("main", lambda: main_table(tag, runs, chosen))
         section("grid", lambda: grid_table(runs))
@@ -553,6 +608,8 @@ def main():
         section("lambda_gate", lambda: sweep_section(runs, chosen, r"clara-lgate([\d.]+)$", "lambda_gate"))
         section("lodo", lambda: lodo_section(D, args.llm, chosen))
         section("live", lambda: live_section(D, args.llm, runs, chosen))
+        section("cross", lambda: cross_section(D, args.llm, ds, load_extra("tamper"), chosen))
+        section("distill", lambda: distill_section(runs, chosen))
         section("llm2", lambda: llm2_section(D, chosen, args.llm2, runs))
         section("derived", lambda: derived_section(res))
 

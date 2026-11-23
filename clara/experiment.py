@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 import torch
 
-from clara.corrupt import replace_llm_outputs, replace_units
+from clara.corrupt import LLM_FIELDS, replace_llm_outputs, replace_units
 from clara.data import SPLITS, Dataset
 from clara.encoder import FrozenPrefix
 from clara.models.base import Method
@@ -81,6 +81,18 @@ class Session:
         raise KeyError(method)
 
     def _eval_items(self, spec: Dict[str, Any]) -> List[Dict[str, Any]]:
+        if spec.get("transform") == "cross":
+            # perturbed text paired with the LLM analysis of the ORIGINAL item: an analysis that is
+            # on topic but no longer faithful to the text in one place (hard case for relevance)
+            by_id = {it["id"]: it for it in self.ds.split("test")}
+            out = []
+            for it in Dataset.load(spec["path"]).split("test"):
+                o, it = by_id[it["orig_id"]], dict(it)
+                for f in LLM_FIELDS:
+                    if f in o:
+                        it[f] = o[f]
+                out.append(it)
+            return out
         if "path" in spec:
             return Dataset.load(spec["path"]).split(spec.get("split", "test"))
         base = self.ds.split(spec.get("base", "test"))

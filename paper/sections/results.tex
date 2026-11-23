@@ -12,16 +12,16 @@
 \end{table}
 
 \paragraph{\method{} 与已有的 LLM+SLM 方法持平，没有稳定的优势}
-在 Weibo21 上 \method{} 的 macro-F1 为 \ptwo{CN/main/clara/macf1}，与 ARG（\ptwo{CN/main/arg/macf1}）几乎相同，高于 FactGuard（\ptwo{CN/main/factguard/macf1}）与 BERT（\ptwo{CN/main/bert/macf1}）约 1 个点。在 GossipCop 上 \method{} 为 \ptwo{EN/main/clara/macf1}，在 SLM 类方法中最高，比 ARG 高 \ptwo{EN/significance/arg/diff_mean} 个点。但配对 bootstrap 检验（附录表~\ref{tab:sig}）显示，除 Weibo21 上对 FactGuard 的差异（$p=\fthree{CN/significance/factguard/bootstrap/p}$）外，\method{} 与其他 SLM 类方法的差异都不显著；对 BERT 的提升在两个数据集上处于显著性边缘（$p=\fthree{CN/significance/bert/bootstrap/p}$ 与 $\fthree{EN/significance/bert/bootstrap/p}$）。分布内精度不是 \method{} 的优势所在。
+在 Weibo21 上 \method{} 的 macro-F1 为 \ptwo{CN/main/clara/macf1}，与 ARG（\ptwo{CN/main/arg/macf1}）几乎相同，高于 FactGuard（\ptwo{CN/main/factguard/macf1}）与 BERT（\ptwo{CN/main/bert/macf1}）约 1 个点。在 GossipCop 上 \method{} 为 \ptwo{EN/main/clara/macf1}，在 SLM 类方法中最高，比 ARG 高 \ptwo{EN/significance/arg/diff_mean} 个点。但配对 bootstrap 检验（附录表~\ref{tab:sig}）显示，在两个数据集共十组与 SLM 类方法的比较中，只有 Weibo21 上对 FactGuard 的一组在 0.05 水平上显著（$p=\fthree{CN/significance/factguard/bootstrap/p}$，未做多重比较校正）；对 BERT 的提升在两个数据集上处于显著性边缘（$p=\fthree{CN/significance/bert/bootstrap/p}$ 与 $\fthree{EN/significance/bert/bootstrap/p}$）。分布内精度不是 \method{} 的优势所在。
 
 \paragraph{最简单的融合方式同样有效}
-BERT+ZS 只在 BERT 的输出上加了一项 LLM 零样本评分，在 Weibo21 上达到 \ptwo{CN/main/bert_zs/macf1}，是 SLM 类方法中最高的；在 GossipCop 上为 \ptwo{EN/main/bert_zs/macf1}，与 ARG、FactGuard 相当。也就是说，在分布内精度这一指标上，让 SLM 阅读 LLM 的理由文本并没有比直接使用一个 LLM 置信度分数带来更多收益。已有的 LLM+SLM 工作没有报告过这一对照。
+BERT+ZS 只在 BERT 的输出上加了一项 LLM 零样本评分，在 Weibo21 上达到 \ptwo{CN/main/bert_zs/macf1}，是 SLM 类方法中最高的；在 GossipCop 上为 \ptwo{EN/main/bert_zs/macf1}，与 ARG、FactGuard 相当。也就是说，在分布内精度这一指标上，让 SLM 阅读 LLM 的理由文本并没有比直接使用一个 LLM 置信度分数带来更多收益。ARG、FactGuard 与 TED 的对比实验中都没有这一对照。
 
 \paragraph{直接微调 LLM 更强}
 LoRA-LLM 在 Weibo21 上的 macro-F1 为 \ptwo{CN/main/lora/macf1}，在 GossipCop 上为 \ptwo{EN/main/lora/macf1}。它只需要一次前向、不需要生成任何文本，代价是训练与推理都要运行 7B 模型（\ref{sec:exp-cost} 节）。把 LLM 冻结、只训练小模型的协同范式，在本文的设置下没有达到直接微调同一个 LLM 的精度。
 
 \paragraph{与已发表数值的关系}
-ARG 论文在同样的数据上报告的 macro-F1 为 78.4（Weibo21）与 79.0（GossipCop），FactGuard 论文报告的是 80.1 与 80.5，TED 为 79.5 与 80.3。本文复现的数值更低，原因有三：其一，这些数值来自单次运行；其二，本文把理由换成了 7B 开源模型的输出；其三，实现上可能存在小的系统差异。为了量化第三点，我们在本机运行了 ARG 的官方代码（仅做库版本兼容性修改，使用其发布的配置与 GPT-3.5 理由）：官方种子得到 78.0，另一个种子得到 77.5；本文的实现在相同的输入与学习率下，5 个种子的均值为 \ptwo{CN/grid/arg_gpt@lr2e-05/test/mean}，每步重算冻结层时 3 个种子的均值为 \ptwo{CN/live/arg_gpt@lr2e-05/live/mean}（附录~\ref{app:live}）。与官方代码相差约 0.5--1 个点，与种子间的波动同一量级，但不能排除存在小的系统差。由于所有方法共用同一套实现与协议，方法之间的比较不受影响。值得注意的是，官方代码的两次运行都没有达到论文报告的 78.4，在本文的多种子设置下，这些方法之间约 1 个点的已发表差距处于随机波动范围之内。
+ARG 论文在同样的数据上报告的 macro-F1 为 78.4（Weibo21）与 79.0（GossipCop），FactGuard 论文报告的是 80.1 与 80.5，TED 为 79.5 与 80.3。本文复现的数值更低，原因有三：其一，这些数值来自单次运行；其二，本文把理由换成了 7B 开源模型的输出；其三，实现上可能存在小的系统差异。为了量化第三点，我们在本机运行了 ARG 的官方代码（仅做库版本兼容性修改，使用其发布的配置与 GPT-3.5 理由）：官方种子得到 78.0，另一个种子得到 77.5；本文的实现在相同的输入与学习率下，5 个种子的均值为 \ptwo{CN/grid/arg_gpt@lr2e-05/test/mean}，每步重算冻结层时 3 个种子的均值为 \ptwo{CN/live/arg_gpt@lr2e-05/live/mean}（附录~\ref{app:live}）。与官方代码两次运行的均值分别相差约 1.1 与 0.7 个点。官方代码自身两个种子之间相差 0.5 个点，因此这一差距与种子波动同一量级，但不能排除存在小的系统差。由于所有方法共用同一套实现与协议，方法之间的比较不受影响。值得注意的是，官方代码的两次运行都没有达到论文报告的 78.4，在本文的多种子设置下，这些方法之间约 1 个点的已发表差距处于随机波动范围之内。
 
 \subsection{当 LLM 的分析不可用时}\label{sec:exp-noise}
 
