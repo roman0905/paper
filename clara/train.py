@@ -21,6 +21,10 @@ from clara.models.base import Method
 TRAIN_DEFAULTS: Dict[str, Any] = dict(
     lr=2e-5, weight_decay=5e-5, optimizer="adam", batch_size=64, epochs=50, patience=5,
     eval_batch_size=256, seed=3759, amp=False,
+    # Scalar parameters (fusion weights, temperatures, biases) get their own, larger step size:
+    # with the encoder learning rate (2e-5 .. 5e-5) Adam moves a scalar by at most ~0.02 over a
+    # whole run, i.e. such parameters would effectively stay at their initial values.
+    lr_scalar=1e-2,
 )
 
 
@@ -72,8 +76,12 @@ def fit(method: Method, data: Dict[str, Dict[str, torch.Tensor]], cfg: Dict[str,
     leaves the best checkpoint loaded."""
     cfg = dict(TRAIN_DEFAULTS, **cfg)
     params = [p for p in method.parameters() if p.requires_grad]
+    scalars = [p for p in params if p.ndim == 0]
+    groups = [{"params": [p for p in params if p.ndim > 0]}]
+    if scalars:
+        groups.append({"params": scalars, "lr": cfg["lr_scalar"], "weight_decay": 0.0})
     opt_cls = torch.optim.AdamW if cfg["optimizer"] == "adamw" else torch.optim.Adam
-    opt = opt_cls(params, lr=cfg["lr"], weight_decay=cfg["weight_decay"])
+    opt = opt_cls(groups, lr=cfg["lr"], weight_decay=cfg["weight_decay"])
     device = data["train"]["label"].device
     use_amp = bool(cfg["amp"]) and device.type == "cuda"
     method.amp = use_amp
