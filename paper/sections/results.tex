@@ -4,7 +4,7 @@
 
 表~\ref{tab:main} 给出两个数据集上的主结果。
 
-\begin{table}[t]
+\begin{table}[!htbp]
 \centering\footnotesize
 \setlength{\tabcolsep}{3.2pt}
 \caption{测试集结果（\%）。可训练方法为多个随机种子的均值，下标为标准差（LoRA-LLM 与学生模型为 3 个种子，其余为 5 个）；每列最优的可训练方法加粗。$^\dagger$ 使用 ARG 数据自带的 GPT-3.5 输出，其余 LLM 输出均来自 Qwen2.5-7B。}\label{tab:main}
@@ -27,23 +27,23 @@ ARG 论文在同样的数据上报告的 macro-F1 为 78.4（Weibo21）与 79.0�
 
 表~\ref{tab:noise} 与图~\ref{fig:noise} 给出把 LLM 分析替换为其他新闻的分析后各方法的表现。
 
-\begin{table}[t]
+\begin{table}[!htbp]
 \centering\footnotesize
 \setlength{\tabcolsep}{3.4pt}
 \caption{LLM 分析被替换时的 macro-F1（\%，多种子均值）。“整条替换”列为被替换的测试样本比例，“单元替换”列为每个声明或理由句被替换的概率。BERT 不使用 LLM，不受影响。BERT+ZS 只使用零样本评分，单元替换不改变它的输入。}\label{tab:noise}
 \fittable{tables/noise.tex}
 \end{table}
 
-\begin{figure}[t]
+\begin{figure}[!htbp]
 \centering
 \includegraphics[width=\linewidth]{figures/noise.pdf}
-\caption{LLM 分析被替换时的 macro-F1。上：整条替换；下：单元替换。阴影为种子间标准差，灰色横线为不使用 LLM 的 BERT。数值见表~\ref{tab:noise}。}\label{fig:noise}
+\caption{LLM 分析被替换时的 macro-F1。上：整条替换；下：单元替换。阴影为种子间标准差，灰色横线为不使用 LLM 的 BERT。FactGuard 的下降幅度远大于其余方法，为保持纵轴的分辨率未画出；全部数值见表~\ref{tab:noise}。}\label{fig:noise}
 \end{figure}
 
 \paragraph{相关性门控能识别不属于该新闻的分析}
 表~\ref{tab:gate} 显示，相关性门控 $r$ 几乎完美地区分了属于本新闻的分析单元与被替换进来的单元：整条替换时 AUC 为 \fthree{CN/gate/relevance/item/auc_r}（Weibo21）与 \fthree{EN/gate/relevance/item/auc_r}（GossipCop），单元替换时为 \fthree{CN/gate/relevance/unit/auc_r} 与 \fthree{EN/gate/relevance/unit/auc_r}。属于本新闻的单元平均 $r$ 在 0.93 以上，被替换的单元在 0.2 以下。判定门控 $g$ 则完全不具备这一能力（AUC 约 0.5）。
 
-\begin{table}[t]
+\begin{table}[!htbp]
 \centering\small
 \caption{相关性门控对“分析单元是否属于该新闻”的区分能力（测试集，多种子均值）。}\label{tab:gate}
 \fittable{tables/gate.tex}
@@ -52,17 +52,17 @@ ARG 论文在同样的数据上报告的 macro-F1 为 78.4（Weibo21）与 79.0�
 \paragraph{去掉相关性门控后模型在替换下崩溃}
 消融实验（表~\ref{tab:ablation}）中“去掉相关性门控与错配负例”的变体，在全部分析被整条替换时，Weibo21 上的 macro-F1 从 \ptwo{CN/ablation/full/noise100/mean} 降到 \ptwo{CN/ablation/no_relevance/noise100/mean}，远低于不使用 LLM 的 BERT。加入相关性门控后，\method{} 在同样条件下保持在 \ptwo{CN/noise/clara/item/100/mean}（Weibo21）与 \ptwo{EN/noise/clara/item/100/mean}（GossipCop），比 BERT 低约 1 个点。
 
-\paragraph{单元替换是声明级结构有优势的地方}
-当分析中只有一部分单元被替换时，\method{} 可以逐条丢弃无关的声明、保留其余部分。在 Weibo21 上，即使全部声明都被替换，\method{} 的 macro-F1 仍为 \ptwo{CN/noise/clara/unit/100/mean}，与未替换时（\ptwo{CN/noise/clara/unit/0/mean}）持平：此时裁决器依靠未被替换的整体判断与文本分支。ARG 在同样条件下从 \ptwo{CN/noise/arg/unit/0/mean} 降到 \ptwo{CN/noise/arg/unit/100/mean}。在该条件下 \method{} 比 ARG 高 \ptwo{CN/noise_sig/unit100/arg/diff_mean} 个点，对测试样本的检验显著（$p_{\text{样本}}=\fthree{CN/noise_sig/unit100/arg/bootstrap/p}$），对种子的检验处于边缘（$p_{\text{种子}}=\fthree{CN/noise_sig/unit100/arg/welch_p}$）；比加了错配负例的 ARG 高 \ptwo{CN/noise_sig/unit100/arg_swap/diff_mean} 个点，两种检验都成立（\fthree{CN/noise_sig/unit100/arg_swap/bootstrap/p} 与 \fthree{CN/noise_sig/unit100/arg_swap/welch_p}）。GossipCop 上没有这一优势：\method{} 从 \ptwo{EN/noise/clara/unit/0/mean} 降到 \ptwo{EN/noise/clara/unit/100/mean}，降幅大于 ARG（\ptwo{EN/noise/arg/unit/0/mean} 降到 \ptwo{EN/noise/arg/unit/100/mean}），两者最终水平相当。
+\paragraph{声明被逐条替换时，\method{} 可以丢弃声明而保留整体判断}
+当分析中的声明被逐条替换时，\method{} 逐条关闭被替换声明的相关性门控，其余部分照常使用。在 Weibo21 上，即使全部声明都被替换，\method{} 的 macro-F1 仍为 \ptwo{CN/noise/clara/unit/100/mean}，与未替换时（\ptwo{CN/noise/clara/unit/0/mean}）持平。这一结果需要谨慎解读，因为两类方法在该条件下保留的信息不同：\method{} 的整体判断与零样本评分不由声明构成，因而没有被替换；ARG 的理由是一段自由文本，全部句子被替换后不再含有任何属于该新闻的 LLM 信息，这一条件对它几乎等同于整条替换（\ptwo{CN/noise/arg/unit/100/mean} 对 \ptwo{CN/noise/arg/item/100/mean}）。因此，此时 \method{} 比 ARG 高出的 \ptwo{CN/noise_sig/unit100/arg/diff_mean} 个点（$p_{\text{样本}}=\fthree{CN/noise_sig/unit100/arg/bootstrap/p}$，$p_{\text{种子}}=\fthree{CN/noise_sig/unit100/arg/welch_p}$）说明的是结构上的一个性质：声明受到污染时，\method{} 可以只丢弃声明、继续使用整体判断；它并不说明在保留同等信息的条件下 \method{} 更稳健。当每个单元以一半的概率被替换时，两者相差 \ptwo{CN/noise_sig/unit50/arg/diff_mean} 个点，不显著。在 GossipCop 上，\method{} 从 \ptwo{EN/noise/clara/unit/0/mean} 降到 \ptwo{EN/noise/clara/unit/100/mean}，与 ARG（\ptwo{EN/noise/arg/unit/100/mean}）相当：如 \ref{sec:exp-gate} 节所示，该数据集上 \method{} 的判定更多依赖声明实例，丢弃声明的代价更大。
 
 \paragraph{需要如实说明的两点}
-第一，ARG 本身对替换就相当稳健：整条替换全部理由后，它在两个数据集上只下降 1.3--1.7 个点。它的融合权重并不能识别被替换的理由（被替换与未被替换样本上的平均权重几乎相同，区分两者的 AUC 为 \fthree{CN/gate/weights_under_noise/arg/auc} 与 \fthree{EN/gate/weights_under_noise/arg/auc}），稳健性来自新闻文本在其表示中占主导。给 ARG 加上同样的错配负例训练后，它在全部分析被整条替换时比 \method{} 高 \ptwo{CN/derived/argswap_minus_clara_item100}（Weibo21）与 \ptwo{EN/derived/argswap_minus_clara_item100}（GossipCop）个点，差异不显著。因此，“在分析不可用时保持稳健”并不是 \method{} 独有的性质；\method{} 相对 ARG 的可测优势只出现在 Weibo21 的单元替换上。第二，FactGuard 对两种替换都非常敏感（整条替换全部分析后降到 \ptwo{CN/noise/factguard/item/100/mean} 与 \ptwo{EN/noise/factguard/item/100/mean}），因为它用 LLM 抽取的 topic-content 代替新闻原文参与交叉注意力。
+第一，ARG 本身对替换就相当稳健：整条替换全部理由后，它在两个数据集上只下降 1.3--1.7 个点。它的融合权重并不能识别被替换的理由（被替换与未被替换样本上的平均权重几乎相同，区分两者的 AUC 为 \fthree{CN/gate/weights_under_noise/arg/auc} 与 \fthree{EN/gate/weights_under_noise/arg/auc}），稳健性来自新闻文本在其表示中占主导。给 ARG 加上同样的错配负例训练后，它在全部分析被整条替换时比 \method{} 高 \ptwo{CN/derived/argswap_minus_clara_item100}（Weibo21）与 \ptwo{EN/derived/argswap_minus_clara_item100}（GossipCop）个点，差异不显著。因此，“在分析不可用时保持稳健”并不是 \method{} 独有的性质：在两类方法都失去全部 LLM 信息的整条替换下，\method{} 与 ARG 没有差别。第二，FactGuard 对两种替换都非常敏感（整条替换全部分析后降到 \ptwo{CN/noise/factguard/item/100/mean} 与 \ptwo{EN/noise/factguard/item/100/mean}），因为它用 LLM 抽取的 topic-content 代替新闻原文参与交叉注意力。
 
 \subsection{判定门控学到了什么}\label{sec:exp-gate}
 
 判定门控 $g$ 的设计意图是估计“LLM 在该实例上是否站对了边”。表~\ref{tab:gate-cells} 按 LLM 的整体判断与新闻标签把测试样本分为四组，给出各组的平均 $g_0$。
 
-\begin{table}[t]
+\begin{table}[!htbp]
 \centering\small
 \caption{判定门控在整体实例上的取值（测试集，多种子均值）。若门控跟随“LLM 是否正确”，则第一、四行应高，第二、三行应低。}\label{tab:gate-cells}
 \fittable{tables/gate_cells.tex}
@@ -74,7 +74,7 @@ ARG 论文在同样的数据上报告的 macro-F1 为 78.4（Weibo21）与 79.0�
 \paragraph{这一现象并非 \method{} 独有}
 ARG 的理由可用性预测器对“该理由对应的 LLM 判断是否正确”的 AUC 看起来不低（表~\ref{tab:useful}），但决定融合权重的打分模块对同一目标的 AUC 只有 0.50--0.55。可用性预测器同时读取新闻与理由：新闻文本提示标签，理由文本提示 LLM 的判断，两者一比较即可得到监督目标。表中“自身预测”一列用 ARG 最终的预测概率与 LLM 判断是否一致来预测同一目标，不需要任何专门的模块，得到的 AUC 与可用性预测器相当或更高。可见可用性预测器并没有提供分类器自身判断之外的信息。
 
-\begin{table}[t]
+\begin{table}[!htbp]
 \centering\small
 \caption{对“该理由对应的 LLM 判断是否正确”的 AUC（测试集，多种子均值）：ARG 的可用性预测器、融合权重，以及“ARG 自身的最终预测与 LLM 判断是否一致”。}\label{tab:useful}
 \fittable{tables/useful.tex}
@@ -88,7 +88,7 @@ LLM 评分偏离 0.5 的程度对其判断是否正确的 AUC 只有 \fthree{CN/
 
 \subsection{风格改写}\label{sec:exp-style}
 
-\begin{table}[t]
+\begin{table}[!htbp]
 \centering\small
 \caption{风格改写前后的 macro-F1（\%）。只统计成功改写的样本，“原文”为同一批样本改写前的结果。分隔线以下两行是只读取 LLM 输出文本、不读新闻原文的 BERT。}\label{tab:style}
 \fittable{tables/style.tex}
@@ -100,7 +100,7 @@ LLM 评分偏离 0.5 的程度对其判断是否正确的 AUC 只有 \fthree{CN/
 \paragraph{LLM 自身的判断同样依赖文风}
 表~\ref{tab:style-llm} 不涉及任何训练，只比较 Qwen2.5-7B 对同一批样本改写前后的评分。零样本判断的 AUC 在 Weibo21 上从 \pone{CN/style_llm/zero-shot P(fake)/auc_orig} 降到 \pone{CN/style_llm/zero-shot P(fake)/auc_style}，在 GossipCop 上从 \pone{EN/style_llm/zero-shot P(fake)/auc_orig} 降到 \pone{EN/style_llm/zero-shot P(fake)/auc_style}。声明级怀疑度在改写后对真假新闻几乎没有区分度。这说明 LLM 在闭卷条件下给出的“常识分析”“声明核查”，其判别力主要来自文本的表面特征，而不是对事实的掌握。把 LLM 的分析拆得更细并不能改变这一点：声明是从改写后的文本中抽取的，其措辞与评分仍然随文风变化。
 
-\begin{table}[t]
+\begin{table}[!htbp]
 \centering\small
 \caption{Qwen2.5-7B 的评分在风格改写前后对真假新闻的区分能力（不涉及训练）。均值差为假新闻与真新闻平均评分之差。}\label{tab:style-llm}
 \fittable{tables/style_llm.tex}
@@ -108,38 +108,47 @@ LLM 评分偏离 0.5 的程度对其判断是否正确的 AUC 只有 \fthree{CN/
 
 \subsection{单句事实篡改：敏感性与定位}\label{sec:exp-loc}
 
-\begin{table}[t]
+\begin{table}[!htbp]
 \centering\small
 \caption{对单句事实篡改的敏感性（\%）。“判假”为被判为假的比例；成对正确率为篡改后样本的预测概率高于其原文的比例，50\% 相当于随机。}\label{tab:tamper}
 \fittable{tables/tamper.tex}
 \end{table}
 
-\paragraph{没有方法对局部事实改动敏感}
-表~\ref{tab:tamper} 显示，把真新闻中的一句话改成与原文事实不符的陈述后，各方法判其为假的比例几乎不变（例如 \method{} 在 Weibo21 上从 \pone{CN/localisation/_sensitivity/clara/flag_rate_original}\% 变为 \pone{CN/localisation/_sensitivity/clara/flag_rate_tampered}\%）；篡改后的预测概率高于原文的比例只有 53\%--55\%，略高于随机。唯一稍高的是 BERT+ZS（约 57\%--61\%），因为 LLM 的零样本评分对部分改动有反应。这与风格改写的结果一致：这些检测器学到的不是“内容是否属实”。需要强调，篡改后的句子只是与原文不符，未必在现实中为假，这项测试衡量的是模型对事实内容变化的敏感程度。
+\paragraph{SLM 类方法对局部事实改动几乎没有反应}
+表~\ref{tab:tamper} 显示，把真新闻中的一句话改成与原文事实不符的陈述后，各 SLM 类方法判其为假的比例几乎不变（例如 \method{} 在 Weibo21 上从 \pone{CN/localisation/_sensitivity/clara/flag_rate_original}\% 变为 \pone{CN/localisation/_sensitivity/clara/flag_rate_tampered}\%）；篡改后的预测概率高于原文的比例只有 53\%--55\%，略高于随机。BERT+ZS 稍高（\pone{CN/localisation/_sensitivity/bert_zs/pairwise_acc}\% 与 \pone{EN/localisation/_sensitivity/bert_zs/pairwise_acc}\%），因为 LLM 的零样本评分对部分改动有反应。直接微调的 LoRA-LLM 最敏感，成对正确率为 \pone{CN/localisation/_sensitivity/lora/pairwise_acc}\% 与 \pone{EN/localisation/_sensitivity/lora/pairwise_acc}\%，但它判假的比例同样变化很小（Weibo21 上从 \pone{CN/localisation/_sensitivity/lora/flag_rate_original}\% 到 \pone{CN/localisation/_sensitivity/lora/flag_rate_tampered}\%）：预测概率朝正确的方向移动了，幅度却远不足以改变判定。这与风格改写的结果一致：这些检测器学到的主要不是“内容是否属实”。需要强调，篡改后的句子只是与原文不符，未必在现实中为假，这项测试衡量的是模型对事实内容变化的敏感程度。
 
-\begin{table}[t]
+\begin{table}[!htbp]
 \centering\small
-\caption{被篡改句子的定位结果（\%）。“单位”为方法给出分数的粒度；声明级分数通过声明所在的句子编号映射到句子。}\label{tab:loc}
+\caption{被篡改句子的定位结果（\%）。“单位”为方法给出分数的粒度；声明级分数通过声明所在的句子编号映射到句子。分隔线以下为 \method{} 与 \student{} 的消融变体。}\label{tab:loc}
 \fittable{tables/loc.tex}
 \end{table}
 
 \paragraph{定位结果只略高于随机}
-在定位任务上（表~\ref{tab:loc}），\method{} 的 Hit@1 在 Weibo21 上为 \pone{CN/localisation/CLARA/hit@1}\%，随机猜测为 \pone{CN/localisation/CLARA/chance}\%；在 GossipCop 上为 \pone{EN/localisation/CLARA/hit@1}\%，随机为 \pone{EN/localisation/CLARA/chance}\%。训练后的裁决器并没有比直接使用 LLM 的怀疑度评分更好，与对 BERT 做遮挡归因也相差无几。原因有两个：LLM 抽取的声明只覆盖了 \pone{CN/localisation/_claim_coverage}\%（Weibo21）与 \pone{EN/localisation/_claim_coverage}\%（GossipCop）的被篡改句子；即使覆盖到，LLM 对这条声明的怀疑度也往往不比其他声明高。“只用新闻级标签即可获得声明级定位”这一预期在闭卷条件下没有实现。
+在定位任务上（表~\ref{tab:loc}），\method{} 的 Hit@1 在 Weibo21 上为 \pone{CN/localisation/CLARA/hit@1}\%，随机猜测为 \pone{CN/localisation/CLARA/chance}\%；在 GossipCop 上为 \pone{EN/localisation/CLARA/hit@1}\%，随机为 \pone{EN/localisation/CLARA/chance}\%。训练后的裁决器并没有比直接使用 LLM 的怀疑度评分更好（\pone{CN/localisation/LLM suspicion scores/hit@1}\% 与 \pone{EN/localisation/LLM suspicion scores/hit@1}\%），各消融变体也都在同一水平。表中最好的是对 LoRA-LLM 做遮挡归因（Weibo21 上 \pone{CN/localisation/LoRA-LLM + occlusion/hit@1}\%），它不需要任何声明级结构。\method{} 的定位受两方面限制：LLM 抽取的声明只覆盖了 \pone{CN/localisation/_claim_coverage}\%（Weibo21）与 \pone{EN/localisation/_claim_coverage}\%（GossipCop）的被篡改句子；即使覆盖到，LLM 对这条声明的怀疑度也往往不比其他声明高。“只用新闻级标签即可获得声明级定位”这一预期在闭卷条件下没有实现。
 
 \subsection{消融实验}\label{sec:exp-ablation}
 
-\begin{table}[t]
+\begin{table}[!htbp]
 \centering\footnotesize
 \setlength{\tabcolsep}{3.4pt}
-\caption{\method{} 的消融（macro-F1，\%）。“整条替换”与“单元替换”分别为全部测试样本的分析被整条替换、全部声明被逐条替换时的结果。Weibo21 为 5 个种子，GossipCop 为 3 个种子。$^{*}$ 表示在同一评测条件下与完整模型的差异在配对 bootstrap 检验下显著（$p<0.05$，未做多重比较校正）。}\label{tab:ablation}
+\caption{\method{} 的消融（macro-F1，\%）。“整条替换”与“单元替换”分别为全部测试样本的分析被整条替换、全部声明被逐条替换时的结果。Weibo21 为 5 个种子，GossipCop 为 3 个种子。$^{*}$ 表示在同一评测条件下与完整模型的差异显著（两种检验均 $p<0.05$，未做多重比较校正）。}\label{tab:ablation}
 \fittable{tables/ablation.tex}
 \end{table}
 
-表~\ref{tab:ablation} 给出各组件的消融结果，详见 \ref{sec:exp-ablation-text} 节。
+表~\ref{tab:ablation} 逐一去掉或替换 \method{} 的组件。以 Weibo21（5 个种子）为主，结果可以归纳为三点。
+
+\paragraph{起作用的是 LLM 的评分，不是论证文本}
+去掉全部论证文本、只保留评分，macro-F1 为 \ptwo{CN/ablation/no_args/test/mean}，与完整模型（\ptwo{CN/ablation/full/test/mean}）没有显著差别。反过来，去掉评分、只保留论证文本，降到 \ptwo{CN/ablation/no_v/test/mean}，低于不使用 LLM 的 BERT（\ptwo{CN/main/bert/macf1}）。把论证前的整体评分从零样本判断换成提示内的第一印象（即严格的单次调用），也降到 \ptwo{CN/ablation/fi_score/test/mean}。这两处下降都显著。也就是说，\method{} 相对 BERT 的提升几乎全部来自 LLM 的数值评分，尤其是单独一次调用得到的零样本评分；成对的正反论证文本没有可测的贡献。这与 BERT+ZS 的结果（\ref{sec:main-results} 节）相互印证。
+
+\paragraph{声明分解与判定门控对精度没有可测的贡献}
+只保留整体实例而去掉全部声明（\ptwo{CN/ablation/no_claims/test/mean}）、去掉判定门控（\ptwo{CN/ablation/no_gate/test/mean}）、整条新闻共用一个判定门控（\ptwo{CN/ablation/item_gate/test/mean}）、把 noisy-OR 换成注意力聚合（\ptwo{CN/ablation/agg_attention/test/mean}）、允许实例证据读取整条新闻（\ptwo{CN/ablation/entangled/test/mean}），与完整模型的差异都不显著。只保留声明、去掉整体实例时为 \ptwo{CN/ablation/no_overall/test/mean}，差异同样不显著；但此时若声明全部被替换，它降到 \ptwo{CN/ablation/no_overall/unit100/mean}，说明 \ref{sec:exp-noise} 节中 \method{} 在声明被替换时的平稳表现确实依靠整体实例。
+
+\paragraph{相关性门控与整体文本分支决定了稳健性}
+去掉相关性门控与错配负例不影响原始测试集上的精度（\ptwo{CN/ablation/no_relevance/test/mean}），但全部分析被整条替换时降到 \ptwo{CN/ablation/no_relevance/noise100/mean}，比完整模型低 \ptwo{CN/ablation/no_relevance/vs_full_noise100/diff_mean} 个点，比 BERT 低 \ptwo{CN/derived/no_relevance_gap} 个点。去掉整体文本分支在原始测试集上降低 \ptwo{CN/ablation/no_global/vs_full/diff_mean} 个点，在整条替换下降到 \ptwo{CN/ablation/no_global/noise100/mean}，且种子间波动很大（标准差 \ptwo{CN/ablation/no_global/noise100/std}）。
 
 \subsection{未见领域}\label{sec:exp-lodo}
 
-\begin{table}[t]
+\begin{table}[!htbp]
 \centering\small
 \caption{Weibo21 留一领域实验的 macro-F1（\%，3 个种子）。训练与验证数据不含被留出的领域。}\label{tab:lodo}
 \fittable{tables/lodo.tex}
@@ -147,13 +156,13 @@ LLM 评分偏离 0.5 的程度对其判断是否正确的 AUC 只有 \fthree{CN/
 
 \subsection{拒答}\label{sec:exp-selective}
 
-\begin{table}[t]
+\begin{table}[!htbp]
 \centering\small
 \caption{选择性预测（多种子均值）。AURC 越低越好；其余各列为只保留置信度最高的一部分样本时的准确率（\%），覆盖率 100\% 即不拒答。“选择器”为在验证集上拟合的逻辑回归。}\label{tab:selective}
 \fittable{tables/selective.tex}
 \end{table}
 
-\begin{figure}[t]
+\begin{figure}[!htbp]
 \centering
 \includegraphics[width=\linewidth]{figures/selective.pdf}
 \caption{保留样本上的准确率随覆盖率的变化（多种子均值）。浅色线为 \method{} 直接用 $|\hat y-0.5|$ 作为置信度的结果。数值见表~\ref{tab:selective}。}\label{fig:selective}
@@ -167,13 +176,13 @@ LLM 评分偏离 0.5 的程度对其判断是否正确的 AUC 只有 \fthree{CN/
 
 \subsection{开销}\label{sec:exp-cost}
 
-\begin{table}[t]
+\begin{table}[!htbp]
 \centering\small
 \caption{每条新闻的 LLM 开销：平均输入与输出 token 数，以及单张 RTX 3090 上用 vLLM 批量生成时每千条新闻的耗时（秒）。$^\ddagger$ LoRA-LLM 的耗时用 Transformers 逐批前向测得，与 vLLM 不是同一推理实现，仅供量级参考。}\label{tab:cost}
 \fittable{tables/cost.tex}
 \end{table}
 
-\begin{table}[t]
+\begin{table}[!htbp]
 \centering\small
 \caption{可训练参数量与单次训练耗时（单张 RTX 3090；SLM 类方法使用冻结层缓存与混合精度，不含一次性的缓存构建）。}\label{tab:train-cost}
 \fittable{tables/train_cost.tex}

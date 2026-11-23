@@ -681,8 +681,10 @@ def fig_noise(A, path):
 
     P.setup()
     fig, axes = plt.subplots(2, 2, figsize=(6.5, 4.7))
-    levels = [("item", "整条替换：被替换的测试样本比例（%）", ("clara", "arg", "arg_swap", "factguard", "bert_zs")),
-              ("unit", "单元替换：每个声明/理由句被替换的概率（%）", ("clara", "arg", "arg_swap", "factguard"))]
+    # FactGuard drops by 8-13 points under replacement (see the table); it is left out of the figure
+    # so that the vertical axis can resolve the differences between the other methods
+    levels = [("item", "整条替换：被替换的测试样本比例（%）", ("clara", "arg", "arg_swap", "bert_zs")),
+              ("unit", "单元替换：每个声明/理由句被替换的概率（%）", ("clara", "arg", "arg_swap"))]
     handles = {}
     for row, (lvl, xlabel, bases) in enumerate(levels):
         for col, D in enumerate(DS):

@@ -14,7 +14,7 @@ y=1 \iff \exists k,\ z_k=1 .\label{eq:mil}
 
 \method{}（\textbf{C}laim-\textbf{L}evel \textbf{A}rgument \textbf{R}eliability \textbf{A}djudication）由一个冻结的 LLM 与一个可训练的小模型裁决器组成（图~\ref{fig:framework}）。LLM 把新闻分解为若干声明，并为每条声明写出正反两方论证；裁决器读取新闻原文与 LLM 的输出，逐个实例决定是否采用、采用多少，再聚合为新闻级判定。LLM 的输出离线生成并缓存，训练与推理阶段裁决器不再访问 LLM。
 
-\begin{figure}[t]
+\begin{figure}[!htbp]
 \centering
 \resizebox{\linewidth}{!}{\input{figures/framework.tex}}
 \caption{\method{} 总体框架。LLM 产生整体实例（$k{=}0$）与 $K$ 条声明，每个实例附带支持论证 $a^+$、质疑论证 $a^-$ 与怀疑度 $v$。裁决器对每个实例计算 SLM 证据、LLM 证据、判定门控 $g$ 与相关性门控 $r$；$r\to0$ 的实例成为不携带证据的空实例。实例经 noisy-OR 聚合后，以“全为空实例的包”为基准与整体文本分支融合。$\Delta\bm u_k$ 表示两方论证表示的差与逐元素积，$\tilde\gamma=\softplus(\gamma)$。虚线表示只在训练时使用的监督信号。}

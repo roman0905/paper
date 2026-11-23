@@ -4,7 +4,7 @@
 
 基于内容的检测长期依赖小规模预训练语言模型（small language model, SLM）学习文本模式\citep{shu2017fake,devlin2019bert}，并发展出多领域建模\citep{nan2021mdfend,zhu2023m3fend}与缓解实体偏置\citep{zhu2022endef}等方向。\citet{hu2024bad} 发现 GPT-3.5 直接判断真伪不如微调的 BERT，但它从不同视角给出的理由对 SLM 有帮助，据此提出 ARG：SLM 读取新闻与两条 LLM 理由，并用一个理由可用性评估器为每条理由预测权重，监督信号是“该理由对应的 LLM 判断是否等于标签”。FactGuard\citep{he2026factguard} 让 LLM 抽取事件中心的 topic-content 以削弱写作风格的影响，并加入常识理由与类似的可用性机制。其他工作让 LLM 生成评论或用户反应\citep{nan2024genfend,wan2024dell}，把 SLM 的预测作为 LLM 的上下文\citep{xu2024supericl}，用 LLM 回答一组人工设计的问题并交给可学习的逻辑层\citep{liu2024teller}，或把 LLM 预测的可信度信号作为弱标签\citep{leite2023pastel}。
 
-这些方法对 LLM 输出的可用性判断都停留在\emph{整条理由}一级：一条理由只对应一个权重。理由内部哪一句可信、哪一句是幻觉无从区分。DiFaR\citep{wan2025difar} 对理由做句级过滤，但它是训练前的后处理，其事实性过滤依赖外部知识检索，面向多模态场景。本文把可用性判断下沉到声明级，并且与检测器联合学习。
+这些方法对 LLM 输出的可用性判断都停留在\emph{整条理由}一级：一条理由只对应一个权重。理由内部哪一句可信、哪一句是幻觉无从区分。DiFaR\citep{wan2025difar} 对理由做句级过滤，但它是训练前的后处理，其事实性过滤依赖外部知识检索，面向多模态场景。本文尝试把可用性判断下沉到声明级并与检测器联合学习，同时检验这类可用性机制实际学到了什么。
 
 \subsection{多智能体辩论}
 
@@ -16,7 +16,7 @@
 
 \subsection{多示例学习与弱监督定位}
 
-多示例学习只需包级标签即可学习实例级判别\citep{dietterich1997solving,maron1998framework,ilse2018attention,carbonneau2018mil}。在虚假信息检测中，dEFEND\citep{shu2019defend} 用句子与评论的协同注意力挑选可解释的句子；WSDMS\citep{yang2023wsdms} 在只有文章级标签的条件下检测误导性句子，其句子级证据来自相关的社交媒体讨论；\citet{yang2025llmmil} 用 LLM 增强的 MIL 联合预测帖子立场与谣言真伪，实例是传播中的帖子。这些方法的实例证据都来自社交上下文。本文的实例是 LLM 从新闻本身分解出的声明及其正反论证，不需要任何传播数据；并且 MIL 假设在本文中的首要用途是为可靠性门控提供监督，而不只是做聚合。
+多示例学习只需包级标签即可学习实例级判别\citep{dietterich1997solving,maron1998framework,ilse2018attention,carbonneau2018mil}。在虚假信息检测中，dEFEND\citep{shu2019defend} 用句子与评论的协同注意力挑选可解释的句子；WSDMS\citep{yang2023wsdms} 在只有文章级标签的条件下检测误导性句子，其句子级证据来自相关的社交媒体讨论；\citet{yang2025llmmil} 用 LLM 增强的 MIL 联合预测帖子立场与谣言真伪，实例是传播中的帖子。这些方法的实例证据都来自社交上下文。本文的实例是 LLM 从新闻本身分解出的声明及其正反论证，不需要任何传播数据；此外，本文还利用 MIL 假设的不对称性为判定门控构造声明级的监督目标。
 
 \subsection{鲁棒性、拒答与评测规范}
 

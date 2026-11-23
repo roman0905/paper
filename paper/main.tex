@@ -5,6 +5,15 @@
 \usepackage{booktabs,multirow,makecell,tabularx,array}
 \usepackage{graphicx,subcaption,xcolor}
 \usepackage{adjustbox}
+\usepackage{float}
+% keep floats close to where they are referenced
+\renewcommand{\topfraction}{0.9}
+\renewcommand{\bottomfraction}{0.8}
+\renewcommand{\textfraction}{0.08}
+\renewcommand{\floatpagefraction}{0.75}
+\setcounter{topnumber}{3}
+\setcounter{bottomnumber}{2}
+\setcounter{totalnumber}{5}
 \usepackage[font=small,labelsep=quad]{caption}
 \usepackage{enumitem}
 \usepackage{tikz}
@@ -29,7 +38,7 @@
 
 \input{numbers.tex}
 
-\title{\textbf{\method{}：面向闭卷虚假新闻检测的声明级论证可靠性裁决}}
+\title{\textbf{\method{}：闭卷虚假新闻检测中的声明级论证裁决及其受控评测}}
 \author{}
 \date{}
 

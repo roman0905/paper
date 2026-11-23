@@ -38,13 +38,13 @@ ARG-D 与 FactGuard-D 的蒸馏权重与学习率取自各自的官方脚本。\
 全部实验在单张 RTX 3090（24\,GB）上完成。生成环境为 vLLM 0.26 与 PyTorch 2.11，训练环境为 PyTorch 2.4、Transformers 4.46 与 PEFT 0.13。
 
 \paragraph{与官方设置的差异}
-（1）ARG 官方使用 GPT-3.5 的理由；FactGuard 官方的常识理由沿用 ARG 数据中的 GPT-3.5 理由，topic-content 由更大的模型抽取（其公开的预处理脚本调用 DeepSeek-V3.1）。本文把所有 LLM 输出统一为 Qwen2.5-7B。（2）FactGuard 官方在中文上使用 bert-base-chinese、英文上使用 RoBERTa，本文为所有方法统一了编码器。（3）FactGuard 的可用性损失以 LLM 判断 $y_{\mathrm{llm}}$ 为目标；当 LLM 未给出明确判断时，本文取目标为 0.5，以保证该项是合法的交叉熵。（4）官方脚本只给出单个随机种子的配置，本文为多种子均值。因此本文复现的数值与原论文不可直接比较，原论文报告的数值见 \ref{sec:main-results} 节。
+（1）LLM 输出。ARG 官方使用 GPT-3.5 的理由。FactGuard 官方用本地部署的 DeepSeek-R1-Distill-Llama-8B（中文）与 SOLAR-10.7B（英文）抽取 topic-content，要求抽取结果与原文的余弦相似度超过阈值，否则重新抽取；其常识理由沿用 ARG 数据中的 GPT-3.5 理由\citep{he2026factguard}。本文把所有 LLM 输出统一为 Qwen2.5-7B；topic-content 用其官方仓库中的提示一次生成，没有做相似度过滤与重试，这可能对 FactGuard 不利。（2）编码器。FactGuard 官方在中文上使用 bert-base-chinese、英文上使用 RoBERTa，本文为所有方法统一了编码器。（3）FactGuard 的损失。可用性损失以 LLM 判断 $y_{\mathrm{llm}}$ 为目标；当 LLM 未给出明确判断时，本文取目标为 0.5。文本损失中 topic-content 分支的目标按论文公式取标签 $y$。前向计算与官方代码一致，包括其中以 topic-content 代替新闻原文参与交叉注意力的做法。（4）官方脚本只给出单个随机种子的配置，本文为多种子均值。（5）训练时冻结层的输出取自缓存，可训练层使用混合精度（附录~\ref{app:live}）。因此本文复现的数值与原论文不可直接比较，原论文报告的数值见 \ref{sec:main-results} 节。
 
 \section{冻结层缓存的核对}\label{app:live}
 
 表~\ref{tab:live} 比较了“缓存冻结层输出”与“每步重新计算冻结层（不缓存、不使用混合精度）”两种训练方式，后者与官方实现的计算完全一致。
 
-\begin{table}[h]
+\begin{table}[H]
 \centering\small
 \caption{缓存与每步重算的对比（Weibo21，3 个种子）。时间为单次运行（含评测）的平均秒数。}\label{tab:live}
 \fittable{tables/live.tex}
@@ -52,7 +52,7 @@ ARG-D 与 FactGuard-D 的蒸馏权重与学习率取自各自的官方脚本。\
 
 \section{学习率网格的全部结果}
 
-\begin{table}[h]
+\begin{table}[H]
 \centering\small
 \caption{各方法在两个学习率下的验证集与测试集 macro-F1（5 个种子）。加粗的验证集数值对应被选中的配置。}\label{tab:grid}
 \fittable{tables/grid.tex}
@@ -60,7 +60,7 @@ ARG-D 与 FactGuard-D 的蒸馏权重与学习率取自各自的官方脚本。\
 
 \section{显著性检验}
 
-\begin{table}[h]
+\begin{table}[H]
 \centering\small
 \caption{\method{} 与各方法在测试集 macro-F1 上的差异（\method{} 减去对方）。置信区间与 $p$ 值来自对测试样本的配对 bootstrap。}\label{tab:sig}
 \fittable{tables/sig.tex}
@@ -68,7 +68,7 @@ ARG-D 与 FactGuard-D 的蒸馏权重与学习率取自各自的官方脚本。\
 
 \section{敏感性分析}\label{app:sens}
 
-\begin{figure}[h]
+\begin{figure}[H]
 \centering
 \includegraphics[width=\linewidth]{figures/sensitivity.pdf}
 \caption{\method{} 对声明数上限 $K$ 与两个损失权重的敏感性（3 个种子，阴影为标准差）。灰色横线为 BERT。}\label{fig:sens}
@@ -82,7 +82,7 @@ ARG-D 与 FactGuard-D 的蒸馏权重与学习率取自各自的官方脚本。\
 \paragraph{单句事实篡改}
 候选为测试集中至少含两句、且存在长度足够的句子的真新闻（中文 \cnt{CN/perturb/tamper_candidates} 条，英文 \cnt{EN/perturb/tamper_candidates} 条）。篡改模型给出的片段必须在句中恰好出现一次，替换后字母与数字内容必须发生变化，且替换不得改变分句结果。最终得到中文 \cnt{CN/perturb/tamper_n} 条、英文 \cnt{EN/perturb/tamper_n} 条，平均每条分别含 \fone{CN/perturb/tamper_mean_sents} 与 \fone{EN/perturb/tamper_mean_sents} 句。按篡改类型的定位结果见表~\ref{tab:loc-type}。
 
-\begin{table}[h]
+\begin{table}[H]
 \centering\small
 \caption{按篡改类型划分的定位 Hit@1（\%）。}\label{tab:loc-type}
 \fittable{tables/loc_type.tex}
