@@ -27,8 +27,12 @@ def _with_lr(base: Dict[str, Any], grid=LR_GRID) -> List[Dict[str, Any]]:
     return out
 
 
+# item-level replacement of all LLM outputs, and unit-level replacement (claims / rationale sentences)
 NOISE_EVALS = [{"name": "noise{:02d}".format(int(r * 100)), "transform": "replace", "rate": r, "seed": 0}
                for r in (0.2, 0.4, 0.6, 0.8, 1.0)]
+UNIT_EVALS = [{"name": "unit{:02d}".format(int(r * 100)), "transform": "units", "rate": r, "seed": 0}
+              for r in (0.25, 0.5, 1.0)]
+ALL_NOISE = NOISE_EVALS + UNIT_EVALS
 
 
 def main(lang: str) -> List[Dict[str, Any]]:
@@ -36,13 +40,20 @@ def main(lang: str) -> List[Dict[str, Any]]:
     is later selected by validation macro-F1."""
     exps: List[Dict[str, Any]] = []
     exps += _with_lr({"name": "bert", "group": "trim", "method": "bert"})
-    exps += _with_lr({"name": "clara", "group": "trim", "method": "clara", "evals": NOISE_EVALS})
+    exps += _with_lr({"name": "clara", "group": "trim", "method": "clara", "evals": ALL_NOISE})
     exps += _with_lr({"name": "arg_gpt", "group": "arg_gpt", "method": "arg",
                       "model": {"rationale_source": "gpt"}})
     exps += _with_lr({"name": "arg", "group": "arg", "method": "arg",
-                      "model": {"rationale_source": "llm"}, "evals": NOISE_EVALS})
-    exps += _with_lr({"name": "factguard", "group": "factguard", "method": "factguard", "evals": NOISE_EVALS})
+                      "model": {"rationale_source": "llm"}, "evals": ALL_NOISE})
+    exps += _with_lr({"name": "factguard", "group": "factguard", "method": "factguard", "evals": ALL_NOISE})
     return exps
+
+
+def controls(lang: str, lr: float) -> List[Dict[str, Any]]:
+    """Control for CLARA's mismatch negatives: ARG trained with the same augmentation.
+    ``lr`` is the (validation-selected) learning rate of ARG."""
+    return [{"name": "arg_swap", "group": "arg", "method": "arg",
+             "model": {"rationale_source": "llm", "swap_rate": 0.2}, "train": {"lr": lr}, "evals": ALL_NOISE}]
 
 
 def main_zs(lang: str) -> List[Dict[str, Any]]:
@@ -80,25 +91,24 @@ CLARA_ABLATIONS: Dict[str, Dict[str, Any]] = {
     "no_claims": {"use_claims": False},
     "no_overall": {"use_overall": False},
     # arguments and scores
-    "refute_only": {"stance": "refute"},
     "no_args": {"stance": "none"},
     "no_v": {"use_v": False},
     "fi_score": {"v0_source": "fi"},      # strictly single-call: in-prompt first impression
-    # reliability gate
+    # verdict gate
     "no_gate": {"gate": "none"},
     "item_gate": {"gate": "instance"},
-    "no_gate_fake": {"gate_fake": False},
-    # aggregation
+    # relevance gate and mismatch negatives
+    "no_relevance": {"relevance": False},
+    # aggregation and structure
     "agg_attention": {"agg": "attention"},
     "no_global": {"use_global": False},
-    # instance scores that also see the article representation
-    "entangled": {"factorised": False},
+    "entangled": {"factorised": False},   # instance scores that also see the article representation
 }
 
 
 def ablation(lang: str, lr: float) -> List[Dict[str, Any]]:
     return [{"name": "clara-" + k, "group": "trim", "method": "clara", "model": v, "train": {"lr": lr},
-             "evals": NOISE_EVALS} for k, v in CLARA_ABLATIONS.items()]
+             "evals": ALL_NOISE} for k, v in CLARA_ABLATIONS.items()]
 
 
 def claims_k(lang: str, lr: float) -> List[Dict[str, Any]]:
@@ -107,11 +117,9 @@ def claims_k(lang: str, lr: float) -> List[Dict[str, Any]]:
 
 
 def sensitivity(lang: str, lr: float) -> List[Dict[str, Any]]:
-    exps = []
-    for lm in (0.0, 0.25, 1.0, 2.0):
-        exps.append({"name": "clara-lmil{:g}".format(lm), "group": "trim", "method": "clara",
-                     "model": {"lambda_mil": lm}, "train": {"lr": lr}})
-    for lg in (0.0, 0.1, 1.0, 2.0):
-        exps.append({"name": "clara-lgate{:g}".format(lg), "group": "trim", "method": "clara",
-                     "model": {"lambda_gate": lg}, "train": {"lr": lr}})
-    return exps
+    """Two alternative values for each loss weight / rate that CLARA fixes a priori."""
+    grid = {"swap": ("swap_rate", (0.1, 0.4)), "lrel": ("lambda_rel", (0.25, 1.0)),
+            "lmil": ("lambda_mil", (0.0, 1.0)), "lgate": ("lambda_gate", (0.0, 1.0))}
+    return [{"name": "clara-{}{:g}".format(tag, v), "group": "trim", "method": "clara",
+             "model": {key: v}, "train": {"lr": lr}, "evals": NOISE_EVALS[-1:]}
+            for tag, (key, values) in grid.items() for v in values]

@@ -120,6 +120,8 @@ def test_baselines(session, method, model):
     {"factorised": False},
     {"factorised": False, "stance": "none"},
     {"stance": "none", "use_v": False},
+    {"relevance": False},
+    {"swap_rate": 0.5},
 ])
 def test_clara_variants(session, model):
     res = session.run("clara", seed=1, model=dict(model, warmup=1), train=FAST, keep=True)
@@ -150,6 +152,73 @@ def test_student(session, model):
         assert "teacher" in res
         assert float(data["train"]["w_item"].sum()) == 48 and float(data["train"]["w_inst"].sum()) > 0
         assert float(data["test"]["w_item"].sum()) == 0      # targets exist for training items only
+
+
+def test_null_instances_fall_back_to_text(session):
+    """With every relevance gate closed the prediction is exactly the text branch."""
+    res = session.run("clara", seed=1, train=FAST, keep=True)
+    m, data = res["_method"], res["_data"]["test"]
+    idx = torch.arange(16)
+    m.eval()
+    last = m.mlp_r.net[-1]
+    with torch.no_grad():
+        w_old, b_old = last.weight.clone(), last.bias.clone()
+        last.weight.zero_()
+        last.bias.fill_(-50.0)                   # r -> 0 for every instance
+        out = m(data, idx)
+        last.weight.copy_(w_old)
+        last.bias.copy_(b_old)
+    assert torch.allclose(out["r"], torch.zeros_like(out["r"]), atol=1e-6)
+    assert torch.allclose(out["evidence"], torch.zeros_like(out["evidence"]), atol=1e-3)
+    assert torch.allclose(out["prob"], torch.sigmoid(out["s_x"] + m.bias), atol=1e-3)
+
+
+def test_swap_training_targets(session):
+    """Mismatch negatives: swapped items take the instances of another item and relevance target 0."""
+    res = session.run("clara", seed=1, model={"swap_rate": 0.5}, train=FAST, keep=True)
+    m, data = res["_method"], res["_data"]["train"]
+    idx = torch.arange(32)
+    m.train()
+    torch.manual_seed(0)
+    out = m(data, idx)
+    sw = out["swapped"]
+    assert 0 < int(sw.sum()) < 32
+    off = data["off"]
+    own_first = off[idx]                                   # first instance index of each item's own bag
+    first = torch.full((32,), 10 ** 9, dtype=torch.long)
+    first.scatter_reduce_(0, out["item"], out["inst"], reduce="amin", include_self=True)
+    assert torch.all(first[~sw] == own_first[~sw])         # genuine items keep their own analysis
+    assert torch.all(first[sw] != own_first[sw])           # swapped items do not
+    loss, logs = m.loss(out, data, idx, epoch=3)
+    assert torch.isfinite(loss) and "rel" in logs
+    m.eval()
+    with torch.no_grad():
+        assert not m(data, idx)["swapped"].any()           # never at evaluation time
+
+
+def test_unit_noise_eval(session):
+    from clara import analysis
+    from clara.report import load_preds
+    import tempfile
+
+    tmp = tempfile.mkdtemp()
+    evals = [{"name": "noise40", "transform": "replace", "rate": 0.4, "seed": 0},
+             {"name": "unit50", "transform": "units", "rate": 0.5, "seed": 0}]
+    runs = {}
+    for name, method, model in [("clara", "clara", {}), ("arg_swap", "arg", {"rationale_source": "llm", "swap_rate": 0.3})]:
+        runs[name] = {1: session.run(method, seed=1, model=model, train=FAST, evals=evals,
+                                      pred_path=os.path.join(tmp, "outputs", "runs", "toy", name, "s1.npz"))}
+        assert runs[name][1]["n_items"]["unit50"] == 16
+    orig = analysis.load_preds
+    analysis.load_preds = lambda tag, name, seed: load_preds(tag, name, seed, root=tmp)
+    try:
+        rel = analysis.relevance_under_noise(session.ds, "toy", "clara", runs["clara"], "zh")
+    finally:
+        analysis.load_preds = orig
+    for k in ("item/auc_r", "unit/auc_r", "unit/r_genuine", "unit/r_foreign"):
+        assert 0.0 <= rel[k] <= 1.0, k
+    z = load_preds("toy", "arg_swap", 1, root=tmp)
+    assert z["test/useful"].shape == (16, 2)
 
 
 def test_gate_targets(session):

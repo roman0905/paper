@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 import torch
 
-from clara.corrupt import replace_llm_outputs
+from clara.corrupt import replace_llm_outputs, replace_units
 from clara.data import SPLITS, Dataset
 from clara.encoder import FrozenPrefix
 from clara.models.base import Method
@@ -86,6 +86,8 @@ class Session:
         base = self.ds.split(spec.get("base", "test"))
         if spec["transform"] == "replace":
             return replace_llm_outputs(base, spec["rate"], spec.get("seed", 0))
+        if spec["transform"] == "units":
+            return replace_units(base, spec["rate"], self.ds.lang, spec.get("seed", 0))
         raise KeyError(spec["transform"])
 
     def _fit_one(self, method: Method, splits: Dict[str, List[Dict[str, Any]]], train_cfg: Dict[str, Any]):

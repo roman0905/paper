@@ -119,11 +119,15 @@ class _TwoRationale(Method):
                 "hard_2": self.hard_mlp_2(mf_2).squeeze(-1), "hard_3": self.hard_mlp_3(mf_3).squeeze(-1)}
 
     def item_outputs(self, out):
-        return {"gate": out["gate"]}
+        return {"gate": out["gate"], "useful": torch.stack([out["hard_2"], out["hard_3"]], dim=1)}
 
 
 class ARG(_TwoRationale):
-    """cfg: ``rationale_source`` in {"gpt", "llm"}, ``w_use``, ``w_pred``."""
+    """cfg: ``rationale_source`` in {"gpt", "llm"}, ``w_use``, ``w_pred``.
+
+    ``swap_rate`` > 0 is NOT part of ARG: it is a control that gives ARG the same mismatch
+    negatives CLARA is trained with (a training item receives the two rationales of another item;
+    their usefulness targets become 0 and the item keeps its own label)."""
 
     def __init__(self, cfg, store, lang):
         super().__init__(cfg, store, lang, n_judge_2=3)
@@ -149,9 +153,15 @@ class ARG(_TwoRationale):
         }
 
     def forward(self, data, idx):
+        B = len(idx)
+        src, swapped = idx, torch.zeros(B, dtype=torch.bool, device=idx.device)
+        if self.training and self.cfg.get("swap_rate", 0) > 0 and B > 1:
+            swapped = torch.rand(B, device=idx.device) < self.cfg["swap_rate"]
+            shift = int(torch.randint(1, B, (1,)))
+            src = torch.where(swapped, idx[(torch.arange(B, device=idx.device) + shift) % B], idx)
         hc, mc = self.encode(self.top_content, data["content"][idx])
-        h2, m2 = self.encode(self.top_ftr, data["r2"][idx])
-        h3, m3 = self.encode(self.top_ftr, data["r3"][idx])
+        h2, m2 = self.encode(self.top_ftr, data["r2"][src])
+        h3, m3 = self.encode(self.top_ftr, data["r3"][src])
         # official: plain mean over all max_len positions, padding included
         expert_2 = self.ca_content_2(h2, hc, mc)[0].mean(1)
         expert_3 = self.ca_content_3(h3, hc, mc)[0].mean(1)
@@ -162,13 +172,15 @@ class ARG(_TwoRationale):
         # official: the judgment predictor pools the rationale without a padding mask
         out["simple_2"] = self.simple_mlp_2(self.simple_attn_2(h2)[0])
         out["simple_3"] = self.simple_mlp_3(self.simple_attn_3(h3)[0])
+        out["src"], out["swapped"] = src, swapped
         return out
 
     def loss(self, out, data, idx, epoch):
+        src, keep = out["src"], (~out["swapped"]).float()
         l_cls = bce(out["prob"], data["label"][idx].float())
-        l_use = bce(out["hard_2"], data["acc2"][idx]) + bce(out["hard_3"], data["acc3"][idx])
-        l_pred = F.cross_entropy(out["simple_2"], data["pred2"][idx]) + \
-            F.cross_entropy(out["simple_3"], data["pred3"][idx])
+        l_use = bce(out["hard_2"], data["acc2"][src] * keep) + bce(out["hard_3"], data["acc3"][src] * keep)
+        l_pred = F.cross_entropy(out["simple_2"], data["pred2"][src]) + \
+            F.cross_entropy(out["simple_3"], data["pred3"][src])
         l = l_cls + self.cfg["w_use"] * l_use / 2 + self.cfg["w_pred"] * l_pred / 2
         return l, {"cls": float(l_cls), "use": float(l_use), "pred": float(l_pred)}
 

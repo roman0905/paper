@@ -25,6 +25,9 @@ TRAIN_DEFAULTS: Dict[str, Any] = dict(
     # with the encoder learning rate (2e-5 .. 5e-5) Adam moves a scalar by at most ~0.02 over a
     # whole run, i.e. such parameters would effectively stay at their initial values.
     lr_scalar=1e-2,
+    # Optional separate learning rate for freshly initialised modules (everything that is not a
+    # pretrained encoder layer).  None = same as the encoder, i.e. the protocol of ARG.
+    lr_head=None,
 )
 
 
@@ -75,9 +78,14 @@ def fit(method: Method, data: Dict[str, Dict[str, torch.Tensor]], cfg: Dict[str,
     """Train ``method`` on data["train"], select on data["val"]. Returns the training summary and
     leaves the best checkpoint loaded."""
     cfg = dict(TRAIN_DEFAULTS, **cfg)
-    params = [p for p in method.parameters() if p.requires_grad]
-    scalars = [p for p in params if p.ndim == 0]
-    groups = [{"params": [p for p in params if p.ndim > 0]}]
+    named = [(n, p) for n, p in method.named_parameters() if p.requires_grad]
+    params = [p for _, p in named]
+    scalars = [p for _, p in named if p.ndim == 0]
+    encoder = [p for n, p in named if p.ndim > 0 and n.startswith("top")]       # pretrained layers
+    heads = [p for n, p in named if p.ndim > 0 and not n.startswith("top")]
+    groups = [{"params": encoder}]
+    if heads:
+        groups.append({"params": heads, "lr": cfg["lr_head"] or cfg["lr"]})
     if scalars:
         groups.append({"params": scalars, "lr": cfg["lr_scalar"], "weight_decay": 0.0})
     opt_cls = torch.optim.AdamW if cfg["optimizer"] == "adamw" else torch.optim.Adam

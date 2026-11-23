@@ -12,30 +12,44 @@ For every instance k the adjudicator computes
     e_k      claim-in-context representation (c_k attending over the news tokens)
     s_slm_k  = MLP_s(c_k)                                the SLM's own evidence about the claim
     s_llm_k  = MLP_a([u-_k - u+_k ; u-_k * u+_k]) + alpha * logit(v_k)          the LLM's evidence
-    g_k      = sigmoid(MLP_g([e_k ; h_x ; u+_k ; u-_k ; type ; score features]))  reliability gate
-    p_k      = sigmoid(s_slm_k + g_k * s_llm_k)          P(instance k is problematic)
+    g_k      = sigmoid(MLP_g([e_k ; h_x ; u+_k ; u-_k ; type ; score features]))  verdict gate
+    r_k      = sigmoid(MLP_r(match(c_k, u_k, h_x)))                             relevance gate
+    p_k      = sigmoid(b0 + r_k * (s_slm_k + g_k * s_llm_k))   P(instance k is problematic)
 
-where u+_k / u-_k encode the pairs (claim, a+) / (claim, a-).  The factorisation is deliberate:
-the instance score depends only on instance-specific inputs (claim text, its two arguments, its
-score), so that it cannot degenerate into a copy of the article-level classifier, which is the
-trivial solution of noisy-OR MIL when instances can see the whole bag.  Article-level text
-evidence has its own channel s_x, and only the gate, which merely scales the LLM evidence, sees
-the context.  ``factorised=False`` gives the entangled variant (e_k and h_x everywhere) for
-ablation.
+where u+_k / u-_k encode the pairs (claim, a+) / (claim, a-).
 
-and aggregates with a noisy-OR, P_MIL = 1 - prod_k (1 - p_k), which is fused with a global text
-branch:  y_hat = sigmoid(s_x + softplus(gamma) * logit(P_MIL) + b).
+Two gates, two questions.  The *relevance* gate r_k asks whether the instance is a faithful unit
+of analysis of *this* news at all; an instance with r_k -> 0 becomes a *null instance* with the
+prior probability sigmoid(b0) and carries no evidence.  The *verdict* gate g_k asks whether the
+LLM took the right side on a relevant instance, and only scales the LLM evidence.
+
+The instance score depends only on instance-specific inputs (claim text, its arguments, its
+score), so it cannot degenerate into a copy of the article-level classifier, the trivial solution
+of noisy-OR MIL when instances can see the whole bag.  Article-level text evidence has its own
+channel s_x; only the gates see the context.  ``factorised=False`` gives the entangled variant.
+
+Aggregation is a noisy-OR, P_MIL = 1 - prod_k (1 - p_k), fused with the text branch as evidence
+relative to a bag of null instances:
+
+    y_hat = sigmoid(s_x + softplus(gamma) * [logit(P_MIL) - logit(P_null)] + b),
+    P_null = 1 - (1 - sigmoid(b0))^n
+
+so that when every instance is null the prediction falls back exactly to the text branch.
 
 Training uses only article-level labels:
 
-    L = BCE(y_hat, y) + lambda_mil * BCE(P_MIL, y) + lambda_gate * L_gate
+    L = BCE(y_hat, y) + lambda_mil * BCE(P_MIL, y) + lambda_gate * L_gate + lambda_rel * L_rel
 
-L_gate supervises the gate with "did the LLM take the right side on this instance?", for the
-instances on which it took a side (|score - 0.5| > delta).  For the holistic instance this is
-observable.  For claims it follows from the MIL asymmetry: in real news every claim is
-unproblematic, so the LLM was right iff it did not suspect the claim; in fake news the latent
-claim state is replaced by its noisy-OR posterior q_k = p_k / P_MIL (stop-gradient, enabled after
-a warm-up).
+L_gate supervises g with "did the LLM take the right side on this instance?", for the instances
+on which it took a side (|score - 0.5| > delta).  For the holistic instance this is observable.
+For claims it follows from the MIL asymmetry: in real news every claim is unproblematic, so the
+LLM was right iff it did not suspect the claim; in fake news the latent claim state is replaced by
+its noisy-OR posterior q_k = p_k / P_MIL (stop-gradient, enabled after a warm-up).
+
+L_rel supervises r with *mismatch negatives*: with probability ``swap_rate`` a training item
+receives the LLM analysis of another item of the batch; its instances get the target r = 0 (all
+genuine instances r = 1), it keeps its own label, and it is excluded from L_mil and L_gate.  The
+detector thereby also learns to classify from the text alone when the analysis is unusable.
 """
 import math
 from typing import Any, Dict, List, Tuple
@@ -53,8 +67,9 @@ DEFAULTS: Dict[str, Any] = dict(
     use_claims=True, use_overall=True, stance="both", use_v=True, use_v0=True, v0_source="zs",
     factorised=True,
     gate="claim", gate_fake=True, agg="noisy_or", use_global=True,
+    relevance=True, swap_rate=0.2, lambda_rel=0.5, null_bias=-2.0,
     lambda_mil=0.5, lambda_gate=0.3, eta=0.5, warmup=2, delta=0.05,
-    hidden=384, dropout=0.2, inst_bias=-2.0,
+    hidden=384, dropout=0.2,
 )
 
 N_SCORE_FEATS = 5
@@ -85,12 +100,20 @@ class CLARA(Method):
         self.mlp_a = MLP(n_a, [h], dr) if n_a > 0 else None
         self.bias_a = nn.Parameter(torch.zeros(()))
         self.mlp_s = MLP(d if fact else 2 * d, [h], dr)
-        nn.init.constant_(self.mlp_s.net[-1].bias, cfg["inst_bias"])
+        self.b0 = nn.Parameter(torch.tensor(float(cfg["null_bias"])))     # prior of a null instance
         self.alpha = nn.Parameter(torch.tensor(1.0))
         self.alpha0 = nn.Parameter(torch.tensor(1.0))
+        if cfg["relevance"]:
+            self.mlp_r = MLP(6 * d, [h], dr)
+            nn.init.constant_(self.mlp_r.net[-1].bias, 2.0)               # start from "relevant"
 
         self.type_emb = nn.Embedding(len(CLAIM_TYPE_ID), 16)
-        self.mlp_g = MLP((2 * d if fact else d) + n_arg + 16 + N_SCORE_FEATS, [h], dr)
+        if cfg["gate"] == "calib":
+            # calibration gate: sees only the claim type and the LLM's own confidence features,
+            # nothing from which the label of the news could be read off
+            self.mlp_g = MLP(16 + N_SCORE_FEATS, [32], 0.0)
+        else:
+            self.mlp_g = MLP((2 * d if fact else d) + n_arg + 16 + N_SCORE_FEATS, [h], dr)
 
         if cfg["agg"] == "attention":
             self.agg_attn = nn.Sequential(nn.Linear(d, 128), nn.Tanh(), nn.Linear(128, 1))
@@ -151,7 +174,15 @@ class CLARA(Method):
         hx_seq, mx = self.encode(self.top_content, data["content"][idx])
         hx, _ = self.pool_x(hx_seq, mx)
 
-        inst, item = self._ragged(data["off"], idx)
+        # mismatch negatives: some training items receive the analysis of another item of the batch
+        src, swapped = idx, torch.zeros(B, dtype=torch.bool, device=idx.device)
+        if self.training and cfg["relevance"] and cfg["swap_rate"] > 0 and B > 1:
+            swapped = torch.rand(B, device=idx.device) < cfg["swap_rate"]
+            shift = int(torch.randint(1, B, (1,)))
+            donor = idx[(torch.arange(B, device=idx.device) + shift) % B]
+            src = torch.where(swapped, donor, idx)
+
+        inst, item = self._ragged(data["off"], src)
         N = len(inst)
         v, v0, valid = data["v"][inst], data["v0"][inst], data["valid"][inst]
         is_overall = (data["type"][inst] == CLAIM_TYPE_ID["overall"]).float()
@@ -172,13 +203,13 @@ class CLARA(Method):
             u_sup, u_ref = u[:N], u[N:]
             if cfg["stance"] == "both":
                 args = [u_ref - u_sup, u_ref * u_sup]
-                gate_args = [u_sup, u_ref]
+                gate_args, u_bar = [u_sup, u_ref], 0.5 * (u_sup + u_ref)
             elif cfg["stance"] == "refute":
-                args, gate_args = [u_ref], [u_ref]
+                args, gate_args, u_bar = [u_ref], [u_ref], u_ref
             else:
-                args, gate_args = [u_sup], [u_sup]
+                args, gate_args, u_bar = [u_sup], [u_sup], u_sup
         else:
-            gate_args = []
+            gate_args, u_bar = [], torch.zeros_like(c)
 
         a_in = args if fact else args + [e]
         s_llm = self.mlp_a(torch.cat(a_in, dim=-1)).squeeze(-1) if a_in else self.bias_a.expand(N)
@@ -193,8 +224,11 @@ class CLARA(Method):
             feats = torch.stack([v, (v - 0.5).abs(), v0, (v0 - v).abs(), data["ent"][inst]], dim=-1)
         else:
             feats = torch.zeros(N, N_SCORE_FEATS, device=v.device)
-        g_ctx = [e, hx[item]] if fact else [e]
-        g_in = torch.cat(g_ctx + gate_args + [self.type_emb(data["type"][inst]), feats], dim=-1)
+        if cfg["gate"] == "calib":
+            g_in = torch.cat([self.type_emb(data["type"][inst]), feats], dim=-1)
+        else:
+            g_ctx = [e, hx[item]] if fact else [e]
+            g_in = torch.cat(g_ctx + gate_args + [self.type_emb(data["type"][inst]), feats], dim=-1)
         g = torch.sigmoid(self.mlp_g(g_in).squeeze(-1))
         if cfg["gate"] == "none":
             g_used = torch.ones_like(g)
@@ -207,7 +241,16 @@ class CLARA(Method):
         else:
             g_used = g
 
-        z = s_slm + g_used * s_llm
+        # relevance gate: is this instance a faithful unit of analysis of this news?
+        if cfg["relevance"]:
+            hx_i = hx[item]
+            r_in = torch.cat([e, hx_i, c * hx_i, (c - hx_i).abs(), u_bar * hx_i, (u_bar - hx_i).abs()], dim=-1)
+            r_raw = torch.sigmoid(self.mlp_r(r_in).squeeze(-1))
+        else:
+            r_raw = torch.ones_like(g)
+        r = r_raw * valid                       # an unparsed analysis is a null instance
+
+        z = self.b0 + r * (s_slm + g_used * s_llm)
         p = torch.sigmoid(z)
 
         # bag-level aggregation
@@ -215,8 +258,11 @@ class CLARA(Method):
         sum_log1m = torch.zeros(B, device=z.device).index_add_(0, item, log1m).clamp(max=-1e-6)
         p_nor = -torch.expm1(sum_log1m)
         cnt = torch.zeros(B, device=z.device).index_add_(0, item, torch.ones_like(z))
+        p0 = torch.sigmoid(self.b0)
+        p_null = p0.expand(B)                   # bag probability if every instance were null
         if cfg["agg"] == "noisy_or":
             p_bag = p_nor
+            p_null = -torch.expm1(cnt * torch.log1p(-p0))
         elif cfg["agg"] == "max":
             p_bag = torch.zeros(B, device=z.device).scatter_reduce_(0, item, p, reduce="amax", include_self=False)
         elif cfg["agg"] == "mean":
@@ -232,12 +278,14 @@ class CLARA(Method):
         p_bag = p_bag.clamp(1e-6, 1 - 1e-6)
 
         s_x = self.mlp_x(hx).squeeze(-1)
+        evidence = logit(p_bag, 1e-6) - logit(p_null.clamp(1e-6, 1 - 1e-6), 1e-6)
         if cfg["use_global"]:
-            prob = torch.sigmoid(s_x + torch.nn.functional.softplus(self.gamma) * logit(p_bag, 1e-6) + self.bias)
+            prob = torch.sigmoid(s_x + torch.nn.functional.softplus(self.gamma) * evidence + self.bias)
         else:
             prob = p_bag
-        return {"prob": prob, "p_bag": p_bag, "p_nor": p_nor, "s_x": s_x, "feature": hx,
-                "p": p, "g": g, "s_llm": s_llm, "s_slm": s_slm, "inst": inst, "item": item, "cnt": cnt}
+        return {"prob": prob, "p_bag": p_bag, "p_nor": p_nor, "s_x": s_x, "feature": hx, "evidence": evidence,
+                "p": p, "g": g, "r": r, "r_raw": r_raw, "s_llm": s_llm, "s_slm": s_slm,
+                "inst": inst, "item": item, "cnt": cnt, "swapped": swapped}
 
     # ------------------------------------------------------------------ loss
     def gate_targets(self, out, data, idx) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -266,12 +314,19 @@ class CLARA(Method):
         l_cls = bce(out["prob"], y)
         logs = {"cls": float(l_cls)}
         total = l_cls
+        genuine = (~out["swapped"]).float()                 # per item
+        genuine_inst = genuine[out["item"]]                 # per instance
         if cfg["use_global"] and cfg["lambda_mil"] > 0:
-            l_mil = bce(out["p_bag"], y)
+            l_mil = bce(out["p_bag"], y, genuine)
             total = total + cfg["lambda_mil"] * l_mil
             logs["mil"] = float(l_mil)
+        if cfg["relevance"] and cfg["lambda_rel"] > 0:
+            l_rel = bce(out["r_raw"], genuine_inst, data["valid"][out["inst"]])
+            total = total + cfg["lambda_rel"] * l_rel
+            logs["rel"] = float(l_rel)
         if cfg["gate"] != "none" and cfg["lambda_gate"] > 0:
             target, weight = self.gate_targets(out, data, idx)
+            weight = weight * genuine_inst
             inst, item = out["inst"], out["item"]
             is_overall = data["type"][inst] == CLAIM_TYPE_ID["overall"]
             fake_claim = (~is_overall) & (data["label"][idx][item] > 0)
@@ -287,9 +342,13 @@ class CLARA(Method):
 
     def item_outputs(self, out):
         B = len(out["prob"])
-        g_mean = torch.zeros(B, device=out["g"].device).index_add_(0, out["item"], out["g"]) / out["cnt"]
-        p_max = torch.zeros(B, device=out["p"].device).scatter_reduce_(0, out["item"], out["p"], reduce="amax", include_self=False)
-        return {"p_bag": out["p_bag"], "s_x": out["s_x"], "g_mean": g_mean, "p_max": p_max}
+        zeros = torch.zeros(B, device=out["g"].device)
+        g_mean = zeros.clone().index_add_(0, out["item"], out["g"]) / out["cnt"]
+        r_mean = zeros.clone().index_add_(0, out["item"], out["r"]) / out["cnt"]
+        p_max = zeros.clone().scatter_reduce_(0, out["item"], out["p"], reduce="amax", include_self=False)
+        return {"p_bag": out["p_bag"], "s_x": out["s_x"], "evidence": out["evidence"],
+                "g_mean": g_mean, "r_mean": r_mean, "p_max": p_max}
 
     def instance_outputs(self, out):
-        return {"p": out["p"], "g": out["g"], "s_llm": out["s_llm"], "s_slm": out["s_slm"], "inst": out["inst"]}
+        return {"p": out["p"], "g": out["g"], "r": out["r"], "s_llm": out["s_llm"], "s_slm": out["s_slm"],
+                "inst": out["inst"]}

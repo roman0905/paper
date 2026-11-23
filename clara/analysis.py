@@ -97,7 +97,7 @@ def instance_table(ds: Dataset, split_items: List[Dict[str, Any]], pred: Dict[st
                    split: str, cfg: Dict[str, Any]) -> Dict[str, np.ndarray]:
     """Flat per-instance arrays aligned with ``<split>/inst_*`` of a CLARA run."""
     by_id = {it["id"]: it for it in split_items}
-    rows = {k: [] for k in ("item", "label", "v", "v0", "type", "sent", "valid")}
+    rows = {k: [] for k in ("item", "label", "v", "v0", "type", "sent", "valid", "corrupted")}
     for i, iid in enumerate(pred[split + "/id"]):
         it = by_id[int(iid)]
         inst = instances(it, ds.lang, cfg.get("max_claims", 6), cfg.get("v0_source", "zs"))
@@ -113,10 +113,12 @@ def instance_table(ds: Dataset, split_items: List[Dict[str, Any]], pred: Dict[st
             rows["type"].append(x["type"])
             rows["sent"].append(x["sent"])
             rows["valid"].append(x["valid"])
+            rows["corrupted"].append(bool(x.get("corrupted", False)))
     out = {k: np.array(v) for k, v in rows.items()}
     off = pred[split + "/off"]
     assert len(out["item"]) == off[-1] == len(pred[split + "/inst_p"]), "instance alignment broken"
     out["p"], out["g"] = pred[split + "/inst_p"], pred[split + "/inst_g"]
+    out["r"] = pred[split + "/inst_r"] if split + "/inst_r" in pred else np.ones_like(out["p"])
     return out
 
 
@@ -184,6 +186,51 @@ def gate_analysis(ds: Dataset, tag: str, name: str, runs: Runs, delta: float = 0
         add("flag/real_overall_only", (over_flag & ~claim_flag)[~y_item].mean())
     return {k: {"mean": float(np.mean(v)), "std": float(np.std(v, ddof=1)) if len(v) > 1 else 0.0}
             for k, v in acc.items()}
+
+
+def relevance_under_noise(ds: Dataset, tag: str, name: str, runs: Runs, lang: str) -> Dict[str, Any]:
+    """How well do the gates separate genuine analysis units from foreign ones?
+
+    Item-level replacement (noiseXX sets): mean relevance gate of an item, AUC against "the item
+    kept its own analysis".  Unit-level replacement (unitXX sets): relevance gate of a claim, AUC
+    against "the claim is genuine".  For reference the same AUCs are computed with the verdict
+    gate g.  Methods without a claim structure are evaluated at the item level with their own
+    gate values (``kind="pair"`` in :func:`gate_under_noise`).
+    """
+    from clara.corrupt import replace_units
+
+    acc: Dict[str, List[float]] = {}
+
+    def add(k, v):
+        if v == v:
+            acc.setdefault(k, []).append(float(v))
+
+    base = ds.split("test")
+    for seed, r in sorted(runs.items()):
+        pred = load_preds(tag, name, seed)
+        if pred is None or "test/inst_r" not in pred:
+            continue
+        for rate in (20, 40, 60, 80):
+            sp = "noise{:02d}".format(rate)
+            if sp + "/corrupted" in pred:
+                c = pred[sp + "/corrupted"]
+                add("item/auc_r", _auc(~c, pred[sp + "/r_mean"]))
+                add("item/auc_g", _auc(~c, pred[sp + "/g_mean"]))
+                add("item/r_genuine", pred[sp + "/r_mean"][~c].mean())
+                add("item/r_foreign", pred[sp + "/r_mean"][c].mean())
+        for rate in (25, 50):
+            sp = "unit{:02d}".format(rate)
+            if sp + "/inst_r" not in pred:
+                continue
+            items = replace_units(base, rate / 100.0, lang, 0)      # same transform, same seed
+            T = instance_table(ds, items, pred, sp, r["config"]["model"])
+            m = T["type"] != "overall"
+            add("unit/auc_r", _auc(~T["corrupted"][m], T["r"][m]))
+            add("unit/auc_g", _auc(~T["corrupted"][m], T["g"][m]))
+            add("unit/r_genuine", T["r"][m & ~T["corrupted"]].mean())
+            add("unit/r_foreign", T["r"][m & T["corrupted"]].mean())
+            add("unit/r_overall", T["r"][~m].mean())
+    return {k: float(np.mean(v)) for k, v in acc.items()}
 
 
 def gate_under_noise(tag: str, name: str, runs: Runs, kind: str,

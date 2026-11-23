@@ -80,5 +80,6 @@ def instances(item: Dict[str, Any], lang: str, max_claims: int = 6,
     for cl in c["claims"][:max_claims]:
         out.append({"claim": cl["claim"], "support": cl["support"], "refute": cl["refute"],
                     "v": float(cl["v"]), "v0": float(cl["v"]), "dist": cl.get("dist"),
-                    "type": cl["type"], "sent": int(cl["sent"]) - 1, "valid": True})
+                    "type": cl["type"], "sent": int(cl["sent"]) - 1, "valid": True,
+                    "corrupted": bool(cl.get("corrupted", False))})
     return out

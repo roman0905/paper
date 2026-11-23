@@ -4,8 +4,8 @@ The student sees only the news.  Its bag consists of a holistic instance plus th
 news, scored by the SLM branch of the teacher architecture (no arguments, no gate) from the text
 of each sentence alone:
 
-    p_j = sigmoid(MLP_s(c_j)),   P_MIL = 1 - prod_j (1 - p_j),
-    y_hat = sigmoid(s_x + softplus(gamma) * logit(P_MIL) + b)
+    p_j = sigmoid(b0 + MLP_s(c_j)),   P_MIL = 1 - prod_j (1 - p_j),
+    y_hat = sigmoid(s_x + softplus(gamma) * [logit(P_MIL) - logit(P_null)] + b)
 
 Besides the usual response distillation, the teacher's claim-level probabilities are aligned to
 sentences through the sentence index j_k that the LLM attached to every claim:
@@ -31,7 +31,7 @@ from clara.models.layers import MLP, MaskAttention, bce, logit
 
 DEFAULTS: Dict[str, Any] = dict(
     max_len=170, sent_len=64, kd_out=1.0, kd_inst=1.0, kd_feat=1.0, lambda_mil=0.5,
-    init_from_teacher=True, hidden=384, dropout=0.2, inst_bias=-2.0,
+    init_from_teacher=True, hidden=384, dropout=0.2, null_bias=-2.0,
 )
 
 
@@ -74,7 +74,7 @@ class CLARAStudent(Method):
         self.pool_x = MaskAttention(d)
         self.pool_claim = MaskAttention(d)
         self.mlp_s = MLP(d, [h], dr)
-        nn.init.constant_(self.mlp_s.net[-1].bias, cfg["inst_bias"])
+        self.b0 = nn.Parameter(torch.tensor(float(cfg["null_bias"])))
         self.mlp_x = MLP(d, [h], dr)
         self.gamma = nn.Parameter(torch.tensor(math.log(math.e - 1.0)))
         self.bias = nn.Parameter(torch.zeros(()))
@@ -86,6 +86,7 @@ class CLARAStudent(Method):
                 getattr(self, name).load_state_dict(getattr(teacher, name).state_dict())
             self.gamma.data.copy_(teacher.gamma.data)
             self.bias.data.copy_(teacher.bias.data)
+            self.b0.data.copy_(teacher.b0.data)
 
     def prepare(self, items):
         cfg = self.cfg
@@ -126,12 +127,15 @@ class CLARAStudent(Method):
         inst, item = CLARA._ragged(data["off"], idx)
         hs, ms = self.encode(self.top_sent, data["unit"][inst])
         c, _ = self.pool_claim(hs, ms)
-        z = self.mlp_s(c).squeeze(-1)
+        z = self.b0 + self.mlp_s(c).squeeze(-1)
         p = torch.sigmoid(z)
         sum_log1m = torch.zeros(B, device=z.device).index_add_(0, item, nn.functional.logsigmoid(-z)).clamp(max=-1e-6)
         p_bag = (-torch.expm1(sum_log1m)).clamp(1e-6, 1 - 1e-6)
+        cnt = torch.zeros(B, device=z.device).index_add_(0, item, torch.ones_like(z))
+        p_null = (-torch.expm1(cnt * torch.log1p(-torch.sigmoid(self.b0)))).clamp(1e-6, 1 - 1e-6)
         s_x = self.mlp_x(hx).squeeze(-1)
-        prob = torch.sigmoid(s_x + nn.functional.softplus(self.gamma) * logit(p_bag, 1e-6) + self.bias)
+        evidence = logit(p_bag, 1e-6) - logit(p_null, 1e-6)
+        prob = torch.sigmoid(s_x + nn.functional.softplus(self.gamma) * evidence + self.bias)
         return {"prob": prob, "p_bag": p_bag, "s_x": s_x, "feature": hx, "p": p, "inst": inst, "item": item}
 
     def loss(self, out, data, idx, epoch):
