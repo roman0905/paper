@@ -1,7 +1,9 @@
-\begin{tabular}{lcccc}
+\begin{tabular}{lccccc}
 \toprule
-方法 & 缓存（macF1） & 每步重算（macF1） & 缓存（秒/次） & 重算（秒/次） \\
+ & \multicolumn{3}{c}{macro-F1（\%）} & \multicolumn{2}{c}{秒/次} \\
+\cmidrule(lr){2-4}\cmidrule(lr){5-6}
+方法 & 缓存+混合精度 & 缓存+全精度 & 每步重算 & 缓存+混合精度 & 每步重算 \\
 \midrule
-ARG（GPT-3.5 理由） & 76.25\pmstd{0.36} & 77.00\pmstd{0.43} & 153 & 1467 \\
+ARG（GPT-3.5 理由） & 76.25\pmstd{0.36} & -- & 77.00\pmstd{0.43} & 153 & 1467 \\
 \bottomrule
 \end{tabular}

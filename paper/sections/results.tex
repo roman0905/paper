@@ -8,7 +8,7 @@
 \centering\footnotesize
 \setlength{\tabcolsep}{3.2pt}
 \caption{测试集结果（\%）。可训练方法为多个随机种子的均值，下标为标准差（LoRA-LLM 与学生模型为 3 个种子，其余为 5 个）；每列最优的可训练方法加粗。$^\dagger$ 使用 ARG 数据自带的 GPT-3.5 输出，其余 LLM 输出均来自 Qwen2.5-7B。}\label{tab:main}
-\input{tables/main.tex}
+\fittable{tables/main.tex}
 \end{table}
 
 \paragraph{\method{} 与已有的 LLM+SLM 方法持平，没有稳定的优势}
@@ -31,7 +31,7 @@ ARG 论文在同样的数据上报告的 macro-F1 为 78.4（Weibo21）与 79.0�
 \centering\footnotesize
 \setlength{\tabcolsep}{3.4pt}
 \caption{LLM 分析被替换时的 macro-F1（\%，多种子均值）。“整条替换”列为被替换的测试样本比例，“单元替换”列为每个声明或理由句被替换的概率。BERT 不使用 LLM，不受影响。BERT+ZS 只使用零样本评分，单元替换不改变它的输入。}\label{tab:noise}
-\input{tables/noise.tex}
+\fittable{tables/noise.tex}
 \end{table}
 
 \begin{figure}[t]
@@ -46,7 +46,7 @@ ARG 论文在同样的数据上报告的 macro-F1 为 78.4（Weibo21）与 79.0�
 \begin{table}[t]
 \centering\small
 \caption{相关性门控对“分析单元是否属于该新闻”的区分能力（测试集，多种子均值）。}\label{tab:gate}
-\input{tables/gate.tex}
+\fittable{tables/gate.tex}
 \end{table}
 
 \paragraph{去掉相关性门控后模型在替换下崩溃}
@@ -65,7 +65,7 @@ ARG 论文在同样的数据上报告的 macro-F1 为 78.4（Weibo21）与 79.0�
 \begin{table}[t]
 \centering\small
 \caption{判定门控在整体实例上的取值（测试集，多种子均值）。若门控跟随“LLM 是否正确”，则第一、四行应高，第二、三行应低。}\label{tab:gate-cells}
-\input{tables/gate_cells.tex}
+\fittable{tables/gate_cells.tex}
 \end{table}
 
 \paragraph{判定门控跟随的是新闻标签，而不是 LLM 的正误}
@@ -77,7 +77,7 @@ ARG 的理由可用性预测器对“该理由对应的 LLM 判断是否正确�
 \begin{table}[t]
 \centering\small
 \caption{对“该理由对应的 LLM 判断是否正确”的 AUC（测试集，多种子均值）：ARG 的可用性预测器、融合权重，以及“ARG 自身的最终预测与 LLM 判断是否一致”。}\label{tab:useful}
-\input{tables/useful.tex}
+\fittable{tables/useful.tex}
 \end{table}
 
 \paragraph{LLM 自身的置信度也不提供这一信息}
@@ -91,7 +91,7 @@ LLM 评分偏离 0.5 的程度对其判断是否正确的 AUC 只有 \fthree{CN/
 \begin{table}[t]
 \centering\small
 \caption{风格改写前后的 macro-F1（\%）。只统计成功改写的样本，“原文”为同一批样本改写前的结果。分隔线以下两行是只读取 LLM 输出文本、不读新闻原文的 BERT。}\label{tab:style}
-\input{tables/style.tex}
+\fittable{tables/style.tex}
 \end{table}
 
 \paragraph{所有闭卷检测器都主要依赖文风}
@@ -103,7 +103,7 @@ LLM 评分偏离 0.5 的程度对其判断是否正确的 AUC 只有 \fthree{CN/
 \begin{table}[t]
 \centering\small
 \caption{Qwen2.5-7B 的评分在风格改写前后对真假新闻的区分能力（不涉及训练）。均值差为假新闻与真新闻平均评分之差。}\label{tab:style-llm}
-\input{tables/style_llm.tex}
+\fittable{tables/style_llm.tex}
 \end{table}
 
 \subsection{单句事实篡改：敏感性与定位}\label{sec:exp-loc}
@@ -111,7 +111,7 @@ LLM 评分偏离 0.5 的程度对其判断是否正确的 AUC 只有 \fthree{CN/
 \begin{table}[t]
 \centering\small
 \caption{对单句事实篡改的敏感性（\%）。“判假”为被判为假的比例；成对正确率为篡改后样本的预测概率高于其原文的比例，50\% 相当于随机。}\label{tab:tamper}
-\input{tables/tamper.tex}
+\fittable{tables/tamper.tex}
 \end{table}
 
 \paragraph{没有方法对局部事实改动敏感}
@@ -120,7 +120,7 @@ LLM 评分偏离 0.5 的程度对其判断是否正确的 AUC 只有 \fthree{CN/
 \begin{table}[t]
 \centering\small
 \caption{被篡改句子的定位结果（\%）。“单位”为方法给出分数的粒度；声明级分数通过声明所在的句子编号映射到句子。}\label{tab:loc}
-\input{tables/loc.tex}
+\fittable{tables/loc.tex}
 \end{table}
 
 \paragraph{定位结果只略高于随机}
@@ -132,7 +132,7 @@ LLM 评分偏离 0.5 的程度对其判断是否正确的 AUC 只有 \fthree{CN/
 \centering\footnotesize
 \setlength{\tabcolsep}{3.4pt}
 \caption{\method{} 的消融（macro-F1，\%）。“整条替换”为全部测试样本的分析被替换，“半数单元替换”为每个单元以 0.5 的概率被替换。Weibo21 为 5 个种子，GossipCop 为 3 个种子。$^{*}$ 表示与完整模型的差异在配对 bootstrap 检验下显著（$p<0.05$）。}\label{tab:ablation}
-\input{tables/ablation.tex}
+\fittable{tables/ablation.tex}
 \end{table}
 
 表~\ref{tab:ablation} 给出各组件的消融结果，详见 \ref{sec:exp-ablation-text} 节。
@@ -142,7 +142,7 @@ LLM 评分偏离 0.5 的程度对其判断是否正确的 AUC 只有 \fthree{CN/
 \begin{table}[t]
 \centering\small
 \caption{Weibo21 留一领域实验的 macro-F1（\%，3 个种子）。训练与验证数据不含被留出的领域。}\label{tab:lodo}
-\input{tables/lodo.tex}
+\fittable{tables/lodo.tex}
 \end{table}
 
 \subsection{拒答}\label{sec:exp-selective}
@@ -150,7 +150,7 @@ LLM 评分偏离 0.5 的程度对其判断是否正确的 AUC 只有 \fthree{CN/
 \begin{table}[t]
 \centering\small
 \caption{选择性预测。AURC 越低越好；Acc@$c$ 为保留置信度最高的 $c\%$ 样本时的准确率（\%）。“选择器”为在验证集上拟合的逻辑回归。}\label{tab:selective}
-\input{tables/selective.tex}
+\fittable{tables/selective.tex}
 \end{table}
 
 \begin{figure}[t]
@@ -164,11 +164,11 @@ LLM 评分偏离 0.5 的程度对其判断是否正确的 AUC 只有 \fthree{CN/
 \begin{table}[t]
 \centering\small
 \caption{每条新闻的 LLM 开销：平均输入与输出 token 数，以及单张 RTX 3090 上用 vLLM 批量生成时每千条新闻的耗时。}\label{tab:cost}
-\input{tables/cost.tex}
+\fittable{tables/cost.tex}
 \end{table}
 
 \begin{table}[t]
 \centering\small
 \caption{可训练参数量与单次训练耗时（单张 RTX 3090；SLM 类方法不含冻结层的一次性缓存）。}\label{tab:train-cost}
-\input{tables/train_cost.tex}
+\fittable{tables/train_cost.tex}
 \end{table}

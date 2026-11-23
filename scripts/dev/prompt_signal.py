@@ -1,7 +1,10 @@
 #!/usr/bin/env python
 """Prompt-development diagnostic: how much label signal do the raw LLM outputs carry?
 
-Run only on samples drawn from the TRAIN split.  Usage: dev_signal.py OUT_DIR NAME DATA_JSON
+Run only on samples drawn from the TRAIN split.  Usage: prompt_signal.py OUT_DIR NAME DATA_JSON
+
+(Used while writing the prompts; written for an earlier prompt version in which the pre-argument
+score was the in-prompt first impression only.)
 """
 import collections
 import json

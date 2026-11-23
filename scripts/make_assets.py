@@ -609,7 +609,7 @@ def tab_cases(A):
         for j, sent in enumerate(c["sents"]):
             t = esc(sent.strip())
             if j == c["tamper_sent"]:
-                t = r"\underline{" + t + r"}（原句：" + esc(c["orig_sentence"]) + "）"
+                t = r"\textbf{〔被篡改〕}" + t + r"\quad\textbf{〔原句〕}" + esc(c["orig_sentence"])
             out.append("[%d] %s\\par" % (j + 1, t))
         out.append(r"\end{quote}}")
         out.append(r"{\small\begin{tabularx}{\linewidth}{@{}clXccc@{}}")

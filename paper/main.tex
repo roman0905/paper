@@ -4,6 +4,7 @@
 \usepackage{amsmath,amssymb,bm}
 \usepackage{booktabs,multirow,makecell,tabularx,array}
 \usepackage{graphicx,subcaption,xcolor}
+\usepackage{adjustbox}
 \usepackage[font=small,labelsep=quad]{caption}
 \usepackage{enumitem}
 \usepackage{tikz}
@@ -14,7 +15,8 @@
 
 \setlist{nosep,leftmargin=2em}
 \renewcommand{\arraystretch}{1.12}
-\newcommand{\sota}[1]{\textbf{#1}}
+% a generated table, scaled down only if it is wider than the text block
+\newcommand{\fittable}[1]{\adjustbox{max width=\linewidth}{\input{#1}}}
 \newcommand{\pmstd}[1]{{\scriptsize$\pm$#1}}
 \newcommand{\method}{CLARA}
 \newcommand{\student}{CLARA-D}

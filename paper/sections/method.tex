@@ -72,10 +72,10 @@ s_k^{\mathrm{llm}} &= \operatorname{MLP}_a\!\big([\bm u_k^- - \bm u_k^+;\ \bm u_
 
 LLM 的输出在两个层面上可能不可用。第一，分析单元本身可能不是这条新闻的忠实分析：声明可能是幻觉出来的，或者整份分析与新闻对不上。第二，即使声明忠实于原文，LLM 对它的判断也可能是错的。\method{} 用两个门控分别处理：
 \begin{align}
-r_k&=\sigma\!\Big(\operatorname{MLP}_r\big([\bm e_k;\ \bm h_x;\ \bm c_k\odot\bm h_x;\ |\bm c_k-\bm h_x|;\ \bar{\bm u}_k\odot\bm h_x;\ |\bar{\bm u}_k-\bm h_x|]\big)\Big), &\bar{\bm u}_k&=\tfrac12(\bm u_k^++\bm u_k^-),\label{eq:rk}\\
+r_k&=\sigma\!\Big(\operatorname{MLP}_r\big([\bm e_k;\ \bm h_x;\ \bm c_k\odot\bm h_x;\ |\bm c_k-\bm h_x|;\ \bar{\bm u}_k\odot\bm h_x;\ |\bar{\bm u}_k-\bm h_x|]\big)\Big),\label{eq:rk}\\
 g_k&=\sigma\!\Big(\operatorname{MLP}_g\big([\bm e_k;\ \bm h_x;\ \bm u_k^+;\ \bm u_k^-;\ \operatorname{emb}(t_k);\ \bm\phi_k]\big)\Big),\label{eq:gk}
 \end{align}
-其中 $\bm\phi_k=[v_k,\ |v_k-0.5|,\ \tilde v_k,\ |\tilde v_k-v_k|,\ H(\pi_k)]$ 是由评分导出的特征（声明取 $\tilde v_k=v_k$）。\emph{相关性门控} $r_k$ 通过声明、论证与新闻表示之间的匹配特征判断该实例是否属于这条新闻；\emph{判定门控} $g_k$ 调节 LLM 证据的权重。实例存在问题的概率为
+其中 $\bar{\bm u}_k=\tfrac12(\bm u_k^++\bm u_k^-)$，$\bm\phi_k=[v_k,\ |v_k-0.5|,\ \tilde v_k,\ |\tilde v_k-v_k|,\ H(\pi_k)]$ 是由评分导出的特征（声明取 $\tilde v_k=v_k$）。\emph{相关性门控} $r_k$ 通过声明、论证与新闻表示之间的匹配特征判断该实例是否属于这条新闻；\emph{判定门控} $g_k$ 调节 LLM 证据的权重。实例存在问题的概率为
 \begin{equation}
 p_k=\sigma\!\Big(b_0+r_k\big(s_k^{\mathrm{slm}}+g_k\,s_k^{\mathrm{llm}}\big)\Big),\label{eq:pk}
 \end{equation}
@@ -147,7 +147,10 @@ t_j=\max_{k:\,j_k=j}p_k^{T},
 \end{equation}
 没有声明与之对齐的句子不参与实例级蒸馏。学生的损失为
 \begin{equation}
-\mathcal L_S=\operatorname{BCE}(\hat y^S,y)+\lambda_{\mathrm{mil}}\operatorname{BCE}(P^S_{\mathrm{MIL}},y)+\kappa_{o}\operatorname{BCE}(\hat y^S,\hat y^T)+\kappa_{i}\,\overline{\operatorname{BCE}}(p^S_j,t_j)+\kappa_{f}\operatorname{MSE}(\bm h^S_x,\bm h^T_x),
+\begin{aligned}
+\mathcal L_S={}&\operatorname{BCE}(\hat y^S,y)+\lambda_{\mathrm{mil}}\operatorname{BCE}(P^S_{\mathrm{MIL}},y)\\
+&+\kappa_{o}\operatorname{BCE}(\hat y^S,\hat y^T)+\kappa_{i}\,\overline{\operatorname{BCE}}(p^S_j,t_j)+\kappa_{f}\operatorname{MSE}(\bm h^S_x,\bm h^T_x),
+\end{aligned}
 \end{equation}
 参数由教师的对应模块初始化。ARG-D 与 FactGuard-D 只蒸馏池化后的特征向量，学生没有实例级输出；\student{} 的学生保留了句级输出。
 

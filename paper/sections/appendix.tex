@@ -47,7 +47,7 @@ ARG-D 与 FactGuard-D 的蒸馏权重与学习率取自各自的官方脚本。\
 \begin{table}[h]
 \centering\small
 \caption{缓存与每步重算的对比（Weibo21，3 个种子）。时间为单次运行（含评测）的平均秒数。}\label{tab:live}
-\input{tables/live.tex}
+\fittable{tables/live.tex}
 \end{table}
 
 \section{学习率网格的全部结果}
@@ -55,7 +55,7 @@ ARG-D 与 FactGuard-D 的蒸馏权重与学习率取自各自的官方脚本。\
 \begin{table}[h]
 \centering\small
 \caption{各方法在两个学习率下的验证集与测试集 macro-F1（5 个种子）。加粗的验证集数值对应被选中的配置。}\label{tab:grid}
-\input{tables/grid.tex}
+\fittable{tables/grid.tex}
 \end{table}
 
 \section{显著性检验}
@@ -63,7 +63,7 @@ ARG-D 与 FactGuard-D 的蒸馏权重与学习率取自各自的官方脚本。\
 \begin{table}[h]
 \centering\small
 \caption{\method{} 与各方法在测试集 macro-F1 上的差异（\method{} 减去对方）。置信区间与 $p$ 值来自对测试样本的配对 bootstrap。}\label{tab:sig}
-\input{tables/sig.tex}
+\fittable{tables/sig.tex}
 \end{table}
 
 \section{敏感性分析}\label{app:sens}
@@ -85,12 +85,12 @@ ARG-D 与 FactGuard-D 的蒸馏权重与学习率取自各自的官方脚本。\
 \begin{table}[h]
 \centering\small
 \caption{按篡改类型划分的定位 Hit@1（\%）。}\label{tab:loc-type}
-\input{tables/loc_type.tex}
+\fittable{tables/loc_type.tex}
 \end{table}
 
 \section{样例}\label{app:cases}
 
-下面两条样例按预先固定的规则选出：篡改测试集中按编号排序、含 3--4 句且不超过 170 个字符的前两条，取随机种子 1 的模型输出，未做任何人工挑选。下划线标出被篡改的句子。
+下面两条样例按预先固定的规则选出：篡改测试集中按编号排序、含 3--4 句且不超过 170 个字符的前两条，取随机种子 1 的模型输出，未做任何人工挑选。被篡改的句子与其原句用〔〕标出；表中 $+$ 与 $-$ 分别为 LLM 写出的支持论证与质疑论证。
 
 \input{tables/cases.tex}
 
