@@ -75,6 +75,8 @@ def compare(tag: str, runs_a: Runs, name_a: str, runs_b: Runs, name_b: str,
     pa = [load_preds(tag, name_a, s) for s in sorted(runs_a)]
     pb = [load_preds(tag, name_b, s) for s in sorted(runs_b)]
     if all(p is not None and split + "/prob" in p for p in pa + pb):
+        ids = pa[0][split + "/id"]
+        assert all(np.array_equal(p[split + "/id"], ids) for p in pa + pb), "predictions are not item-aligned"
         y = pa[0][split + "/label"]
         out["bootstrap"] = paired_bootstrap(y, [p[split + "/prob"] for p in pa], [p[split + "/prob"] for p in pb])
     return out
@@ -168,6 +170,18 @@ def gate_analysis(ds: Dataset, tag: str, name: str, runs: Runs, delta: float = 0
         add("p/claims_fake_news", T["p"][~ov & y].mean())
         add("p/overall_real_news", T["p"][ov & ~y].mean())
         add("p/overall_fake_news", T["p"][ov & y].mean())
+        # which instances carry the decision: per item, is any claim / the holistic instance flagged?
+        n_items = int(T["item"].max()) + 1
+        claim_flag = np.zeros(n_items, dtype=bool)
+        np.logical_or.at(claim_flag, T["item"][~ov], T["p"][~ov] > 0.5)
+        over_flag = np.zeros(n_items, dtype=bool)
+        np.logical_or.at(over_flag, T["item"][ov], T["p"][ov] > 0.5)
+        y_item = pred["test/label"] == 1
+        add("flag/fake_any_claim", claim_flag[y_item].mean())
+        add("flag/fake_overall_only", (over_flag & ~claim_flag)[y_item].mean())
+        add("flag/fake_none", (~over_flag & ~claim_flag)[y_item].mean())
+        add("flag/real_any_claim", claim_flag[~y_item].mean())
+        add("flag/real_overall_only", (over_flag & ~claim_flag)[~y_item].mean())
     return {k: {"mean": float(np.mean(v)), "std": float(np.std(v, ddof=1)) if len(v) > 1 else 0.0}
             for k, v in acc.items()}
 

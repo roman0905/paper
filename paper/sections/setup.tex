@@ -1,0 +1,54 @@
+\section{实验设置}\label{sec:setup}
+
+\subsection{数据集}
+
+实验使用 ARG\citep{hu2024bad} 发布的两个按时间划分的数据集：中文的 Weibo21\citep{nan2021mdfend} 与英文的 GossipCop\citep{shu2020fakenewsnet}。训练集早于验证集与测试集，更接近真实部署中“用过去的数据检测未来的新闻”的情形。统计信息见表~\ref{tab:data}。两个数据集的类别分布不同：Weibo21 大致均衡，GossipCop 的假新闻不足五分之一，因此以 macro-F1 为主指标。
+
+\begin{table}[t]
+\centering\small
+\caption{数据集统计。声明数为 Qwen2.5-7B 对每条新闻分解出的声明条数（不含整体实例）。}\label{tab:data}
+\input{tables/data.tex}
+\end{table}
+
+\subsection{对比方法}
+
+所有需要 LLM 的方法使用同一个 LLM，即 Qwen2.5-7B-Instruct\citep{qwen25}，以排除“换了更强的 LLM”这一混淆因素。
+
+\begin{itemize}
+\item \textbf{仅 LLM（不训练）}：零样本与零样本 CoT\citep{kojima2022large} 判断，提示词沿用 ARG。作为参照，同时列出 ARG 数据中附带的 GPT-3.5 判断。
+\item \textbf{BERT}\citep{devlin2019bert}：只读新闻文本的 SLM 基线。
+\item \textbf{LoRA-LLM}：用 LoRA\citep{hu2022lora} 把 Qwen2.5-7B 直接微调为分类器。模型读取与零样本基线完全相同的提示，在答案位置对“0”“1”两个 token 的 logit 做二分类交叉熵，因此它与零样本基线的差别只在于微调。
+\item \textbf{BERT+ZS}：在 BERT 的输出 logit 上加一项 $w\cdot\logit(p_{\mathrm{zs}})$，$p_{\mathrm{zs}}$ 是 LLM 零样本判断为假的概率，$w$ 为可学习标量。这是利用 LLM 的最简单方式，用来衡量更复杂的协同结构在此之上还能带来多少。
+\item \textbf{ARG}\citep{hu2024bad} 与 \textbf{FactGuard}\citep{he2026factguard}：按官方代码重新实现了前向计算与损失。ARG 的两条理由、FactGuard 的 topic-content 与常识理由均用官方提示词由 Qwen2.5-7B 重新生成。对 ARG 另外报告使用数据集自带 GPT-3.5 理由的结果，以便与原论文对照。
+\item \textbf{学生模型}：ARG-D、FactGuard-D 与 \student{}，推理时不调用 LLM。
+\end{itemize}
+TED\citep{liu2025ted} 的官方仓库在本文写作时尚未放出代码，D2D\citep{han2025d2d} 依赖 GPT-4o，两者未能在相同条件下复现，故不列入对比。
+
+\subsection{训练与评测协议}\label{sec:protocol}
+
+所有基于 SLM 的方法共用 ARG 官方实现的协议：编码器只微调最后一层；批大小 64；最多 50 轮；按验证集 macro-F1 早停（耐心值 5）；判定阈值固定为 0.5；测试集只在选定的检查点上评估一次。编码器统一为 chinese-bert-wwm-ext\citep{cui2021wwm}（中文）与 bert-base-uncased（英文）。在此基础上我们做了三点统一，以保证比较公平：
+\begin{enumerate}
+\item \textbf{多种子}：主实验每个配置运行 5 个随机种子，报告均值与标准差；LoRA-LLM、蒸馏、跨领域与敏感性实验为 3 个种子。
+\item \textbf{相同的学习率搜索}：每个方法都在 $\{2\times10^{-5},5\times10^{-5}\}$ 上运行（即 ARG 与 FactGuard 官方配置在两个数据集上使用的两个值），按种子平均的验证集 macro-F1 选择。全部网格点的结果见附录表~\ref{tab:grid}。
+\item \textbf{基线超参数}：ARG 与 FactGuard 的损失权重取自各自官方脚本。
+\end{enumerate}
+\method{} 的超参数为预先设定的固定值，没有在任何数据集上搜索：$\lambda_{\mathrm{mil}}{=}0.5$，$\lambda_{\mathrm{gate}}{=}0.3$，$\eta{=}0.5$，$\delta{=}0.05$，$T_w{=}2$，$K\le6$；敏感性分析见附录~\ref{app:sens}。提示词在从训练集抽取的 400 条样本上调试，未使用验证集与测试集。完整实现细节见附录~\ref{app:impl}。
+
+显著性检验采用对测试样本的配对 bootstrap\citep{koehn2004statistical}（5{,}000 次重采样，统计量为种子平均的 macro-F1 之差）。
+
+\subsection{分布内精度之外的评测}\label{sec:robust-sets}
+
+\paragraph{理由噪声}
+把测试集中比例为 $\rho$ 的样本的全部 LLM 输出替换为另一条随机测试样本的 LLM 输出，新闻原文与标签不变。这模拟 LLM 给出与新闻无关或错误的分析。一个知道何时不该采信 LLM 的检测器，性能应平缓地退回到仅文本的水平。
+
+\paragraph{风格改写}
+沿用 SheepDog\citep{wu2024sheepdog} 的风格攻击设定：把测试集中的假新闻改写为官方通稿文风，把真新闻改写为营销号文风，要求保留全部事实。改写由 Qwen3-8B\citep{qwen3} 完成，与负责分析的 Qwen2.5-7B 是不同的模型，避免同一模型既制造扰动又检测扰动；改写后的文本由 Qwen2.5-7B 重新分析。长度变化过大的改写被丢弃，结果只在成功改写的样本上统计，并与同一批样本的原文结果配对比较。
+
+\paragraph{定位：单句事实篡改}
+现有数据集没有句级标注。为了定量评估定位能力，我们从测试集的真新闻中随机选一句，由 Qwen3-8B 提出一处最小的片段替换（否定、数字、时间、实体或结果），程序执行替换并校验替换确实改变了文字内容。得到的样本标签为假，且虚假信息的位置已知。评测指标为被篡改句子在模型给出的句子排序中的 Hit@1 与 MRR，并列时按随机打破的期望计算。黑盒分类器用遮挡归因\citep{li2016understanding}作为对照：逐句删除后预测为假的概率下降最多的句子即为其定位结果。需要强调，这是一个受控的合成基准，篡改后的句子未必在现实中为假，它衡量的是模型对局部事实改动的敏感位置是否正确。
+
+\paragraph{未见领域}
+ARG 版本的 Weibo21 不含领域标签。我们用文本匹配从 Weibo21 原始发布中恢复了 83.5\% 样本的九类领域标签，并对测试样本不少于 100 条的六个领域做留一领域实验：训练集与验证集去掉该领域的全部样本，测试集只保留该领域的样本。
+
+\paragraph{拒答}
+用风险--覆盖率曲线下面积（AURC）\citep{geifman2019bias}与固定覆盖率下的准确率评估选择性预测。
