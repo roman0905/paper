@@ -119,9 +119,34 @@ def tamper_build(args):
     print(args.out, len(out), dict(stats))
 
 
+def occlude_build(args):
+    """Leave-one-sentence-out variants of the tampered items (dataset format, text only).
+
+    Used for the occlusion attribution baseline of black-box classifiers: the sentence whose
+    removal lowers P(fake) the most is the predicted location of the falsehood."""
+    items = json.load(open(args.tamper, encoding="utf-8"))
+    out = []
+    for it in items:
+        sents = split_sentences(it["content"], args.lang)
+        for j in range(len(sents)):
+            rest = [s.strip() if args.lang == "en" else s for k, s in enumerate(sents) if k != j]
+            out.append({"id": it["source_id"] * 100 + j, "split": "test", "label": 1,
+                        "content": JOIN[args.lang].join(rest), "sents": rest,
+                        "orig_id": it["source_id"], "occl_sent": j})
+    os.makedirs(os.path.dirname(args.out), exist_ok=True)
+    json.dump({"name": args.name, "lang": args.lang, "llm": None, "items": out},
+              open(args.out, "w", encoding="utf-8"), ensure_ascii=False)
+    print(args.out, len(out), "variants of", len(items), "items")
+
+
 def main():
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
+    a = sub.add_parser("occlude-build")
+    a.add_argument("--tamper", required=True)
+    a.add_argument("--lang", required=True)
+    a.add_argument("--name", required=True)
+    a.add_argument("--out", required=True)
     a = sub.add_parser("style-build")
     a.add_argument("--dataset", required=True)
     a.add_argument("--gen", required=True)
@@ -135,7 +160,8 @@ def main():
     a.add_argument("--gen", required=True)
     a.add_argument("--out", required=True)
     args = ap.parse_args()
-    {"style-build": style_build, "tamper-input": tamper_input, "tamper-build": tamper_build}[args.cmd](args)
+    {"style-build": style_build, "tamper-input": tamper_input, "tamper-build": tamper_build,
+     "occlude-build": occlude_build}[args.cmd](args)
 
 
 if __name__ == "__main__":

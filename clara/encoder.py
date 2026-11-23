@@ -30,7 +30,8 @@ class TopLayers(nn.Module):
             p.requires_grad_(True)
 
     def forward(self, hidden: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
-        ext = (1.0 - mask[:, None, None, :].to(hidden.dtype)) * torch.finfo(hidden.dtype).min
+        # additive mask; -1e4 is representable in float16 (mixed precision) and zeroes the weight
+        ext = (1.0 - mask[:, None, None, :].to(hidden.dtype)) * -1e4
         for layer in self.layers:
             hidden = layer(hidden, attention_mask=ext)[0]
         return hidden

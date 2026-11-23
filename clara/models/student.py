@@ -1,9 +1,10 @@
 """CLARA-D: an LLM-free student with sentence-level localisation.
 
 The student sees only the news.  Its bag consists of a holistic instance plus the sentences of the
-news, scored by the SLM branch of the teacher architecture (no arguments, no gate):
+news, scored by the SLM branch of the teacher architecture (no arguments, no gate) from the text
+of each sentence alone:
 
-    p_j = sigmoid(MLP_s([e_j ; h_x])),   P_MIL = 1 - prod_j (1 - p_j),
+    p_j = sigmoid(MLP_s(c_j)),   P_MIL = 1 - prod_j (1 - p_j),
     y_hat = sigmoid(s_x + softplus(gamma) * logit(P_MIL) + b)
 
 Besides the usual response distillation, the teacher's claim-level probabilities are aligned to
@@ -26,7 +27,7 @@ import torch.nn as nn
 from clara.data import CLAIM_TYPE_ID, OVERALL_CLAIM
 from clara.models.base import Method
 from clara.models.clara import CLARA
-from clara.models.layers import MLP, CrossAttention, MaskAttention, bce, logit
+from clara.models.layers import MLP, MaskAttention, bce, logit
 
 DEFAULTS: Dict[str, Any] = dict(
     max_len=170, sent_len=64, kd_out=1.0, kd_inst=1.0, kd_feat=1.0, lambda_mil=0.5,
@@ -72,9 +73,7 @@ class CLARAStudent(Method):
         self.top_sent = store.new_top()
         self.pool_x = MaskAttention(d)
         self.pool_claim = MaskAttention(d)
-        self.ctx = CrossAttention(d, heads=4)
-        self.ctx_norm = nn.LayerNorm(d)
-        self.mlp_s = MLP(2 * d, [h], dr)
+        self.mlp_s = MLP(d, [h], dr)
         nn.init.constant_(self.mlp_s.net[-1].bias, cfg["inst_bias"])
         self.mlp_x = MLP(d, [h], dr)
         self.gamma = nn.Parameter(torch.tensor(math.log(math.e - 1.0)))
@@ -82,7 +81,8 @@ class CLARAStudent(Method):
         if teacher is not None and cfg["init_from_teacher"]:
             self.top_content.load_state_dict(teacher.top_content.state_dict())
             self.top_sent.load_state_dict(teacher.top_llm.state_dict())
-            for name in ("pool_x", "pool_claim", "ctx", "ctx_norm", "mlp_s", "mlp_x"):
+            names = ["pool_x", "pool_claim", "mlp_x"] + (["mlp_s"] if teacher.cfg["factorised"] else [])
+            for name in names:
                 getattr(self, name).load_state_dict(getattr(teacher, name).state_dict())
             self.gamma.data.copy_(teacher.gamma.data)
             self.bias.data.copy_(teacher.bias.data)
@@ -126,9 +126,7 @@ class CLARAStudent(Method):
         inst, item = CLARA._ragged(data["off"], idx)
         hs, ms = self.encode(self.top_sent, data["unit"][inst])
         c, _ = self.pool_claim(hs, ms)
-        ctx, _ = self.ctx(c[:, None, :], hx_seq[item], mx[item])
-        e = self.ctx_norm(c + ctx.squeeze(1))
-        z = self.mlp_s(torch.cat([e, hx[item]], dim=-1)).squeeze(-1)
+        z = self.mlp_s(c).squeeze(-1)
         p = torch.sigmoid(z)
         sum_log1m = torch.zeros(B, device=z.device).index_add_(0, item, nn.functional.logsigmoid(-z)).clamp(max=-1e-6)
         p_bag = (-torch.expm1(sum_log1m)).clamp(1e-6, 1 - 1e-6)

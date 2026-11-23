@@ -46,6 +46,12 @@ class Method(nn.Module):
         self.store.set_training(mode)
         return self
 
+    amp = False     # set by the training loop: run the trainable encoder layers in float16
+
     def encode(self, top: nn.Module, ids: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         hidden, mask = self.store.fetch(ids)
+        if self.amp and hidden.is_cuda:
+            with torch.autocast("cuda", dtype=torch.float16):
+                out = top(hidden, mask)
+            return out.float(), mask
         return top(hidden, mask), mask

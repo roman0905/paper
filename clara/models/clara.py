@@ -6,12 +6,20 @@ strongest supporting argument a+, strongest refuting argument a-, and a suspicio
 
 For every instance k the adjudicator computes
 
-    e_k      claim-in-context representation (claim text attending over the news tokens);
-             it contains no LLM argument
-    s_slm_k  = MLP_s([e_k ; h_x])                       the SLM's own evidence
-    s_llm_k  = MLP_a([u-_k - u+_k ; u-_k * u+_k ; e_k]) + alpha * logit(v_k)     the LLM's evidence
-    g_k      = sigmoid(MLP_g([e_k ; u+_k ; u-_k ; type ; score features]))     reliability gate
-    p_k      = sigmoid(s_slm_k + g_k * s_llm_k)         P(instance k is problematic)
+    c_k      representation of the claim text alone
+    e_k      claim-in-context representation (c_k attending over the news tokens)
+    s_slm_k  = MLP_s(c_k)                                the SLM's own evidence about the claim
+    s_llm_k  = MLP_a([u-_k - u+_k ; u-_k * u+_k]) + alpha * logit(v_k)          the LLM's evidence
+    g_k      = sigmoid(MLP_g([e_k ; h_x ; u+_k ; u-_k ; type ; score features]))  reliability gate
+    p_k      = sigmoid(s_slm_k + g_k * s_llm_k)          P(instance k is problematic)
+
+where u+_k / u-_k encode the pairs (claim, a+) / (claim, a-).  The factorisation is deliberate:
+the instance score depends only on instance-specific inputs (claim text, its two arguments, its
+score), so that it cannot degenerate into a copy of the article-level classifier, which is the
+trivial solution of noisy-OR MIL when instances can see the whole bag.  Article-level text
+evidence has its own channel s_x, and only the gate, which merely scales the LLM evidence, sees
+the context.  ``factorised=False`` gives the entangled variant (e_k and h_x everywhere) for
+ablation.
 
 and aggregates with a noisy-OR, P_MIL = 1 - prod_k (1 - p_k), which is fused with a global text
 branch:  y_hat = sigmoid(s_x + softplus(gamma) * logit(P_MIL) + b).
@@ -40,9 +48,9 @@ from clara.models.layers import MLP, CrossAttention, MaskAttention, bce, logit
 
 DEFAULTS: Dict[str, Any] = dict(
     max_len=170, pair_len=128, claim_len=48, max_claims=6,
-    use_claims=True, use_overall=True, stance="both", use_v=True, use_v0=True,
+    use_claims=True, use_overall=True, stance="both", use_v=True, use_v0=True, factorised=True,
     gate="claim", gate_fake=True, agg="noisy_or", use_global=True,
-    lambda_mil=0.5, lambda_gate=0.5, eta=0.5, warmup=2, delta=0.05,
+    lambda_mil=0.5, lambda_gate=0.3, eta=0.5, warmup=2, delta=0.05,
     hidden=384, dropout=0.2, inst_bias=-2.0,
 )
 
@@ -68,16 +76,18 @@ class CLARA(Method):
         self.ctx = CrossAttention(d, heads=4)
         self.ctx_norm = nn.LayerNorm(d)
 
+        fact = cfg["factorised"]
         n_arg = {"both": 2 * d, "refute": d, "support": d, "none": 0}[cfg["stance"]]
-        self.mlp_a = MLP(n_arg + d, [h], dr)
-        self.mlp_s = MLP(2 * d, [h], dr)
+        n_a = n_arg + (0 if fact else d)
+        self.mlp_a = MLP(n_a, [h], dr) if n_a > 0 else None
+        self.bias_a = nn.Parameter(torch.zeros(()))
+        self.mlp_s = MLP(d if fact else 2 * d, [h], dr)
         nn.init.constant_(self.mlp_s.net[-1].bias, cfg["inst_bias"])
         self.alpha = nn.Parameter(torch.tensor(1.0))
         self.alpha0 = nn.Parameter(torch.tensor(1.0))
 
-        n_gate_arg = {"both": 2 * d, "refute": d, "support": d, "none": 0}[cfg["stance"]]
         self.type_emb = nn.Embedding(len(CLAIM_TYPE_ID), 16)
-        self.mlp_g = MLP(d + n_gate_arg + 16 + N_SCORE_FEATS, [h], dr)
+        self.mlp_g = MLP((2 * d if fact else d) + n_arg + 16 + N_SCORE_FEATS, [h], dr)
 
         if cfg["agg"] == "attention":
             self.agg_attn = nn.Sequential(nn.Linear(d, 128), nn.Tanh(), nn.Linear(128, 1))
@@ -143,7 +153,8 @@ class CLARA(Method):
         v, v0, valid = data["v"][inst], data["v0"][inst], data["valid"][inst]
         is_overall = (data["type"][inst] == CLAIM_TYPE_ID["overall"]).float()
 
-        # claim-in-context representation, free of any LLM argument
+        # claim representation c (text alone) and claim-in-context representation e
+        fact = cfg["factorised"]
         hc, mc = self.encode(self.top_llm, data["claim"][inst])
         c, _ = self.pool_claim(hc, mc)
         ctx, _ = self.ctx(c[:, None, :], hx_seq[item], mx[item])
@@ -166,19 +177,21 @@ class CLARA(Method):
         else:
             gate_args = []
 
-        s_llm = self.mlp_a(torch.cat(args + [e], dim=-1)).squeeze(-1)
+        a_in = args if fact else args + [e]
+        s_llm = self.mlp_a(torch.cat(a_in, dim=-1)).squeeze(-1) if a_in else self.bias_a.expand(N)
         if cfg["use_v"]:
             s_llm = s_llm + self.alpha * logit(v, 0.02)
             if cfg["use_v0"]:
                 s_llm = s_llm + self.alpha0 * logit(v0, 0.02) * is_overall
         s_llm = s_llm * valid
-        s_slm = self.mlp_s(torch.cat([e, hx[item]], dim=-1)).squeeze(-1)
+        s_slm = self.mlp_s(c if fact else torch.cat([e, hx[item]], dim=-1)).squeeze(-1)
 
         if cfg["use_v"]:
             feats = torch.stack([v, (v - 0.5).abs(), v0, (v0 - v).abs(), data["ent"][inst]], dim=-1)
         else:
             feats = torch.zeros(N, N_SCORE_FEATS, device=v.device)
-        g_in = torch.cat([e] + gate_args + [self.type_emb(data["type"][inst]), feats], dim=-1)
+        g_ctx = [e, hx[item]] if fact else [e]
+        g_in = torch.cat(g_ctx + gate_args + [self.type_emb(data["type"][inst]), feats], dim=-1)
         g = torch.sigmoid(self.mlp_g(g_in).squeeze(-1))
         if cfg["gate"] == "none":
             g_used = torch.ones_like(g)

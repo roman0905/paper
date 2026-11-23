@@ -20,7 +20,7 @@ from clara.models.base import Method
 
 TRAIN_DEFAULTS: Dict[str, Any] = dict(
     lr=2e-5, weight_decay=5e-5, optimizer="adam", batch_size=64, epochs=50, patience=5,
-    eval_batch_size=256, seed=3759,
+    eval_batch_size=256, seed=3759, amp=False,
 )
 
 
@@ -75,6 +75,9 @@ def fit(method: Method, data: Dict[str, Dict[str, torch.Tensor]], cfg: Dict[str,
     opt_cls = torch.optim.AdamW if cfg["optimizer"] == "adamw" else torch.optim.Adam
     opt = opt_cls(params, lr=cfg["lr"], weight_decay=cfg["weight_decay"])
     device = data["train"]["label"].device
+    use_amp = bool(cfg["amp"]) and device.type == "cuda"
+    method.amp = use_amp
+    scaler = torch.cuda.amp.GradScaler(enabled=use_amp)
     gen = torch.Generator(device="cpu").manual_seed(cfg["seed"])
     n = len(data["train"]["label"])
     best, best_state, best_epoch, history = -1.0, None, -1, []
@@ -91,13 +94,15 @@ def fit(method: Method, data: Dict[str, Dict[str, torch.Tensor]], cfg: Dict[str,
             out = method(data["train"], idx)
             loss, logs = method.loss(out, data["train"], idx, epoch)
             opt.zero_grad(set_to_none=True)
-            loss.backward()
-            opt.step()
+            scaler.scale(loss).backward()
+            scaler.step(opt)
+            scaler.update()
             nb += 1
             for k, v in logs.items():
                 agg[k] = agg.get(k, 0.0) + v
         val = evaluate(predict(method, data["val"], cfg["eval_batch_size"]))
-        history.append({"epoch": epoch, "val_macf1": val["macf1"], **{k: v / max(nb, 1) for k, v in agg.items()}})
+        history.append({"epoch": epoch, "val_macf1": val["macf1"], "val_auc": val["auc"],
+                        "seconds": time.time() - t0, **{k: v / max(nb, 1) for k, v in agg.items()}})
         log("  epoch {:2d}  {}  val macF1 {:.4f} acc {:.4f}".format(
             epoch, " ".join("{}={:.4f}".format(k, v / max(nb, 1)) for k, v in agg.items()), val["macf1"], val["acc"]))
         if val["macf1"] > best:

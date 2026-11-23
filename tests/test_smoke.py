@@ -116,6 +116,9 @@ def test_baselines(session, method, model):
     {"agg": "attention"}, {"agg": "max"}, {"agg": "mean"},
     {"use_global": False},
     {"max_claims": 1},
+    {"factorised": False},
+    {"factorised": False, "stance": "none"},
+    {"stance": "none", "use_v": False},
 ])
 def test_clara_variants(session, model):
     res = session.run("clara", seed=1, model=dict(model, warmup=1), train=FAST, keep=True)
