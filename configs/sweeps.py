@@ -7,7 +7,9 @@ frozen-prefix cache per group so that seeds and variants of the same group share
 """
 from typing import Any, Dict, List
 
-LR_GRID = [2e-5, 5e-5, 1e-4]
+# the two learning rates used by the official ARG / FactGuard configurations (zh: 2e-5, en: 5e-5);
+# every method is run with both and the better one on validation is kept
+LR_GRID = [2e-5, 5e-5]
 
 
 def _lr_name(name: str, lr: float) -> str:
@@ -81,13 +83,13 @@ CLARA_ABLATIONS: Dict[str, Dict[str, Any]] = {
     "refute_only": {"stance": "refute"},
     "no_args": {"stance": "none"},
     "no_v": {"use_v": False},
+    "fi_score": {"v0_source": "fi"},      # strictly single-call: in-prompt first impression
     # reliability gate
     "no_gate": {"gate": "none"},
     "item_gate": {"gate": "instance"},
     "no_gate_fake": {"gate_fake": False},
     # aggregation
     "agg_attention": {"agg": "attention"},
-    "agg_max": {"agg": "max"},
     "no_global": {"use_global": False},
     # instance scores that also see the article representation
     "entangled": {"factorised": False},

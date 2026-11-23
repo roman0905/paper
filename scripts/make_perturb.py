@@ -66,6 +66,9 @@ def style_build(args):
         stats["label{}_{}".format(it["label"], r["style"] if r else "na")] += 1
         out.append(raw_item(it, text if ok else it["content"], it["label"], ID_OFFSET["style"] + it["id"],
                             {"style": r["style"] if r else None, "rewritten": bool(ok)}))
+    if stats["ok"] < 0.8 * len(out):
+        sys.exit("style-build: only {} of {} items have a usable rewrite - refusing to write {}".format(
+            stats["ok"], len(out), args.out))
     os.makedirs(os.path.dirname(args.out), exist_ok=True)
     json.dump(out, open(args.out, "w", encoding="utf-8"), ensure_ascii=False)
     print(args.out, len(out), dict(stats))
@@ -100,20 +103,25 @@ def tamper_build(args):
         if r is None or r["finish"] != "stop":
             stats["no_generation"] += 1
             continue
-        old, new = it["sents"][j].strip(), r["text"].strip()
-        if not new or new == old or not (0.5 <= len(new) / len(old) <= 1.6):
-            stats["bad_edit"] += 1
+        e = r.get("edit")
+        if not e:
+            stats["unusable_span"] += 1
             continue
-        sents = list(it["sents"])
+        old, new = it["sents"][j].strip(), e["new_sentence"].strip()
+        sents = [s.strip() for s in it["sents"]]
         sents[j] = new
-        content = JOIN[lang].join(s.strip() if lang == "en" else s for s in sents)
-        again = split_sentences(content, lang)
-        if len(again) != len(sents) or any(a.strip() != b.strip() for a, b in zip(again, sents)):
+        content = JOIN[lang].join(sents)
+        again = [s.strip() for s in split_sentences(content, lang)]
+        if again != sents:
             stats["split_changed"] += 1
             continue
         stats["ok"] += 1
+        stats["type_" + e["change_type"]] += 1
         out.append(raw_item(it, content, 1, ID_OFFSET["tamper"] + it["id"],
-                            {"tamper_sent": j, "orig_sentence": old, "new_sentence": new}))
+                            {"tamper_sent": j, "orig_sentence": old, "new_sentence": new,
+                             "change_type": e["change_type"]}))
+    if not out:
+        sys.exit("tamper-build: no usable edits - refusing to write {}".format(args.out))
     os.makedirs(os.path.dirname(args.out), exist_ok=True)
     json.dump(out, open(args.out, "w", encoding="utf-8"), ensure_ascii=False)
     print(args.out, len(out), dict(stats))

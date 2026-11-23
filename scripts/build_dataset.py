@@ -16,7 +16,7 @@ from clara.data import LABEL, PRED, SPLITS  # noqa: E402
 from clara.text import split_sentences  # noqa: E402
 
 
-EXTRA_FIELDS = ("orig_id", "tamper_sent", "orig_sentence", "new_sentence", "style", "rewritten")
+EXTRA_FIELDS = ("orig_id", "tamper_sent", "orig_sentence", "new_sentence", "change_type", "style", "rewritten")
 
 
 def read_jsonl(path):

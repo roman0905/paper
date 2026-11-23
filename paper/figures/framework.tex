@@ -1,0 +1,68 @@
+% Framework figure (TikZ); natural width ~167 mm, scaled to \linewidth where it is included.
+% Orange = LLM-side quantities, blue = SLM-side, green = gate.
+\definecolor{cLLM}{HTML}{EB6834}
+\definecolor{cSLM}{HTML}{2A78D6}
+\definecolor{cGate}{HTML}{1BAF7A}
+\definecolor{cInk}{HTML}{0B0B0B}
+\definecolor{cMuted}{HTML}{6B6A66}
+\definecolor{cLine}{HTML}{C3C2B7}
+\begin{tikzpicture}[
+  x=1mm, y=1mm, font=\footnotesize, >={Stealth[length=1.6mm]},
+  box/.style={draw=cLine, rounded corners=2pt, fill=white, align=center, inner sep=2.5pt, text=cInk},
+  llm/.style={box, draw=cLLM!80, fill=cLLM!7},
+  slm/.style={box, draw=cSLM!80, fill=cSLM!7},
+  gate/.style={box, draw=cGate!90, fill=cGate!9},
+  flow/.style={->, draw=cMuted, line width=0.5pt},
+  sup/.style={->, draw=cMuted, dashed, line width=0.5pt},
+  lab/.style={font=\scriptsize, text=cMuted, inner sep=1.5pt}]
+
+% ---------------- column A: news and LLM
+\node[box, minimum width=31mm] (x) at (0,0) {新闻 $x$\\[-1pt]{\scriptsize 句子 $s_1,\dots,s_n$}};
+\node[llm, minimum width=31mm] (llm) at (0,-17) {冻结的 LLM\\[-1pt]{\scriptsize 单次调用，结构化解码}};
+\node[llm, minimum width=31mm, align=left] (out) at (0,-37) {%
+  {\scriptsize 第一印象 $v^{\mathrm{fi}}$}\\[-1pt]
+  {\scriptsize 声明 $c_k$（类型 $t_k$，句 $j_k$）}\\[-1pt]
+  {\scriptsize 论证 $a_k^{+},a_k^{-}$，怀疑度 $v_k$}\\[-1pt]
+  {\scriptsize 整体判断（$k=0$）}};
+\draw[flow] (x) -- (llm);
+\draw[flow] (llm) -- (out);
+
+% ---------------- column B: evidence
+\node[slm, minimum width=43mm] (sx) at (46,0) {整体文本分支\\[-1pt]{\scriptsize $s_x=\mathrm{MLP}_x(\bm h_x)$}};
+\node[slm, minimum width=43mm] (sslm) at (46,-17) {SLM 证据\\[-1pt]{\scriptsize $s_k^{\mathrm{slm}}=\mathrm{MLP}_s(\bm c_k)$}};
+\node[llm, minimum width=43mm] (sllm) at (46,-29.5) {LLM 证据\\[-1pt]{\scriptsize $s_k^{\mathrm{llm}}=\mathrm{MLP}_a(\Delta\bm u_k)+\alpha\,\mathrm{logit}\,v_k$}};
+\node[gate, minimum width=43mm] (g) at (46,-42) {可靠性门控\\[-1pt]{\scriptsize $g_k=\sigma\big(\mathrm{MLP}_g([\bm e_k;\bm h_x;\bm u_k^{\pm};\bm\phi_k])\big)$}};
+
+% ---------------- columns C, D: combination
+\node[box, minimum width=31mm] (pk) at (91,-29.5) {实例概率\\[-1pt]{\scriptsize $p_k=\sigma\big(s_k^{\mathrm{slm}}+g_k\,s_k^{\mathrm{llm}}\big)$}};
+\node[box, minimum width=38mm] (nor) at (132.5,-29.5) {noisy-OR 聚合\\[-1pt]{\scriptsize $P_{\mathrm{MIL}}=1-\prod_k(1-p_k)$}};
+\node[box, minimum width=38mm] (y) at (132.5,0) {新闻级预测\\[-1pt]{\scriptsize $\hat y=\sigma\big(s_x+\tilde\gamma\,\mathrm{logit}\,P_{\mathrm{MIL}}+b\big)$}};
+
+% ---------------- flows
+\draw[flow] (x) -- (sx);
+\coordinate (bus) at (20,-37);
+\draw[draw=cMuted, line width=0.5pt] (out.east) -- (bus);
+\draw[flow] (bus) |- (sslm.west);
+\draw[flow] (bus) |- (sllm.west);
+\draw[flow] (bus) |- (g.west);
+\draw[flow] (sslm.east) -| ([xshift=-5mm]pk.north);
+\draw[flow] (sllm) -- (pk);
+\draw[flow] (g.east) -| ([xshift=-5mm]pk.south);
+\draw[flow] (pk) -- (nor);
+\draw[flow] (nor) -- (y);
+\draw[flow] (sx) -- (y);
+
+% ---------------- instance plate
+\begin{scope}[on background layer]
+  \node[draw=cLine, dashed, rounded corners=3pt, inner sep=3pt, fit=(sslm)(sllm)(g)(pk)] (plate) {};
+\end{scope}
+\node[lab, anchor=north east] at ([yshift=-0.5mm]plate.south east) {对每个实例 $k=0,\dots,K$};
+
+% ---------------- supervision (training only)
+\node[lab] (lcls) at (132.5,11) {$\mathrm{BCE}(\hat y,\,y)$};
+\node[lab] (lmil) at (132.5,-41) {$\mathrm{BCE}(P_{\mathrm{MIL}},\,y)$};
+\node[lab] (lgate) at (46,-54) {$\mathcal L_{\mathrm{gate}}$：目标为“LLM 在该实例上是否站对边”};
+\draw[sup] (lcls) -- (y);
+\draw[sup] (lmil) -- (nor);
+\draw[sup] (lgate) -- (g);
+\end{tikzpicture}

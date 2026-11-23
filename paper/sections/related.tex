@@ -1,0 +1,25 @@
+\section{相关工作}\label{sec:related}
+
+\subsection{LLM 与小模型协同的虚假新闻检测}
+
+基于内容的检测长期依赖小规模预训练语言模型（small language model, SLM）学习文本模式\citep{shu2017fake,devlin2019bert}，并发展出多领域建模\citep{nan2021mdfend,zhu2023m3fend}与缓解实体偏置\citep{zhu2022endef}等方向。\citet{hu2024bad} 发现 GPT-3.5 直接判断真伪不如微调的 BERT，但它从不同视角给出的理由对 SLM 有帮助，据此提出 ARG：SLM 读取新闻与两条 LLM 理由，并用一个理由可用性评估器为每条理由预测权重，监督信号是“该理由对应的 LLM 判断是否等于标签”。FactGuard\citep{he2026factguard} 让 LLM 抽取事件中心的 topic-content 以削弱写作风格的影响，并加入常识理由与类似的可用性机制。其他工作让 LLM 生成评论或用户反应\citep{nan2024genfend,wan2024dell}，把 SLM 的预测作为 LLM 的上下文\citep{xu2024supericl}，用 LLM 回答一组人工设计的问题并交给可学习的逻辑层\citep{liu2024teller}，或把 LLM 预测的可信度信号作为弱标签\citep{leite2023pastel}。
+
+这些方法对 LLM 输出的可用性判断都停留在\emph{整条理由}一级：一条理由只对应一个权重。理由内部哪一句可信、哪一句是幻觉无从区分。DiFaR\citep{wan2025difar} 对理由做句级过滤，但它是训练前的后处理，其事实性过滤依赖外部知识检索，面向多模态场景。本文把可用性判断下沉到声明级，并且与检测器联合学习。
+
+\subsection{多智能体辩论}
+
+让多个 LLM 实例相互辩论可以改进事实性与推理\citep{du2024debate,liang2024mad,chan2024chateval}。TED\citep{liu2025ted} 把正式辩论流程引入虚假新闻检测，由正反两队经多个阶段辩论，再由一个可训练的分析模块在辩论图上裁决；D2D\citep{han2025d2d} 设计了五阶段辩论与多维评判。这类方法每条新闻需要多次 LLM 调用。值得注意的是，TED 的消融显示去掉可训练裁决模块的损失远大于去掉辩论流程本身\citep{liu2025ted}，FactGuard 也报告用两个简单提示即可达到与之相近的精度\citep{he2026factguard}。这提示在闭卷条件下，如何\emph{裁决} LLM 的输出可能比生成更长的辩论更重要。本文把辩论压缩为一次调用内对每条声明的正反论证，把重心放在裁决器上。
+
+\subsection{声明分解}
+
+把复杂陈述分解为可独立核查的子问题或原子事实，是事实核查与生成文本事实性评估中的常用手段\citep{chen2022claimdecomp,pan2023programfc,zhang2023hiss,min2023factscore}。这些工作在分解之后依靠检索到的证据逐条验证。本文处于闭卷设定，分解的作用不同：它为裁决器提供了比整篇新闻更细的判断单位，使得“LLM 在哪里可信”可以被逐条学习。
+
+\subsection{多示例学习与弱监督定位}
+
+多示例学习只需包级标签即可学习实例级判别\citep{dietterich1997solving,maron1998framework,ilse2018attention,carbonneau2018mil}。在虚假信息检测中，dEFEND\citep{shu2019defend} 用句子与评论的协同注意力挑选可解释的句子；WSDMS\citep{yang2023wsdms} 在只有文章级标签的条件下检测误导性句子，其句子级证据来自相关的社交媒体讨论；\citet{yang2025llmmil} 用 LLM 增强的 MIL 联合预测帖子立场与谣言真伪，实例是传播中的帖子。这些方法的实例证据都来自社交上下文。本文的实例是 LLM 从新闻本身分解出的声明及其正反论证，不需要任何传播数据；并且 MIL 假设在本文中的首要用途是为可靠性门控提供监督，而不只是做聚合。
+
+\subsection{鲁棒性、拒答与评测规范}
+
+基于内容的检测器容易依赖写作风格等捷径\citep{geirhos2020shortcut}。SheepDog\citep{wu2024sheepdog} 表明用 LLM 改写新闻风格即可显著降低检测器性能，并用风格无关的训练加以缓解；后续工作研究了对抗式风格增强\citep{park2024adstyle}与保持事实的情绪改写\citep{guo2026emotion}。LLM 生成的虚假信息也比人写的更难检测\citep{chen2024can,chen2024combating}。
+
+在评测方面，\citet{thibault2025guide} 系统审查了常用数据集，指出其中普遍存在虚假相关与不可核查的样本；RealFactBench\citep{yang2025realfactbench} 与 LiveFact\citep{xu2026livefact} 强调模型应能识别“无法判定”的情形。选择性分类\citep{geifman2017selective,geifman2019bias}与校准\citep{guo2017calibration}为此提供了度量工具，LLM 自身置信度的可靠性也已有专门研究\citep{xiong2024can,tian2023just}。另一方面，参数高效微调\citep{hu2022lora}使得直接把开源 LLM 微调为分类器成为可行的强基线\citep{raza2024comparative}，而已有的 LLM 与 SLM 协同工作通常没有与之比较。本文把这一基线纳入对比，并在分布内精度之外报告理由噪声、风格改写、未见领域、拒答与定位等维度的结果。

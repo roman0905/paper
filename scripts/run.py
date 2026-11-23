@@ -30,7 +30,8 @@ def perturb_evals(ds, exp):
     if (exp.get("model") or {}).get("rationale_source") == "gpt":
         return []                      # no GPT-3.5 rationales exist for perturbed texts
     out = []
-    kinds = ["style", "tamper"] + (["occl"] if exp["method"] == "bert" else [])
+    plain_bert = exp["method"] == "bert" and not (exp.get("model") or {}).get("use_zs")
+    kinds = ["style", "tamper"] + (["occl"] if plain_bert else [])
     for kind in kinds:
         llm = "none" if kind == "occl" else ds.llm
         path = os.path.join(ROOT, "outputs", "datasets", "{}-{}.{}.json".format(ds.name, kind, llm))

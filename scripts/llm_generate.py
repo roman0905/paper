@@ -22,14 +22,14 @@ from clara.llm import tasks as T  # noqa: E402
 
 
 def load_items(path):
+    """A JSON array (raw ARG file), a dataset file ({"items": [...]}) or JSON lines."""
     with open(path, encoding="utf-8") as f:
-        first = f.read(1)
-        f.seek(0)
-        if first == "[":
-            data = json.load(f)
-        else:
-            data = [json.loads(line) for line in f if line.strip()]
-    if isinstance(data, dict) and "items" in data:      # a file written by build_dataset.py
+        text = f.read()
+    try:
+        data = json.loads(text)
+    except ValueError:
+        data = [json.loads(line) for line in text.splitlines() if line.strip()]
+    if isinstance(data, dict):
         data = data["items"]
     items = []
     for i, d in enumerate(data):
@@ -136,6 +136,8 @@ def main():
             items = [it for it in items if it.get("split") == args.split]
         if args.limit:
             items = items[:args.limit]
+        if not items:
+            sys.exit("no items for spec {} (split filter: {})".format(spec, args.split))
         for task in args.tasks:
             out_path = os.path.join(args.out_dir, "{}.{}.jsonl".format(name, task))
             have = done_ids(out_path)
@@ -168,9 +170,12 @@ def main():
                         elif task in ("td", "cs", "cot"):
                             rec["pred"] = T.parse_binary(c.text)
                             rec["rationale"] = T.clean_rationale(c.text, b["prefix"])
-                        elif task in ("style", "tamper"):
+                        elif task == "style":
                             rec["text"] = T.clean_generation(c.text)
                             rec.update(b["meta"])
+                        elif task == "tamper":
+                            rec.update(b["meta"])
+                            rec["edit"] = T.apply_tamper(it["sents"][b["meta"]["sent"]].strip(), c.text)
                         elif task == "zs":
                             rec["pred"] = T.parse_binary(c.text)
                             rec["p_fake"] = T.binary_soft(to_tokens(c))

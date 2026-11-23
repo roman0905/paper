@@ -482,23 +482,30 @@ TAMPER_SYSTEM = {
     "zh": "你是一名事实核查研究助手，正在为虚假信息检测模型构造受控的测试样本。",
     "en": "You are a research assistant in fact-checking who builds controlled test cases for misinformation detectors.",
 }
+TAMPER_TYPES = ["negation", "number", "time", "entity", "outcome"]
 TAMPER_USER = {
-    "zh": """下面给出一条消息以及其中的一句话。请对这句话做一处最小的事实性改动，使它变成与原文事实不符的陈述，例如：把肯定改为否定、修改数字或时间、替换人物/机构/地点、颠倒因果或结果。
+    "zh": """下面给出一条消息以及其中的一句话。请对这句话做一处最小的事实性改动，使它陈述的事实与原文不同。
+做法：从这句话里选一个尽量短的连续片段 original_span（必须与句中文字完全一致），给出替换它的文字 new_span；除这个片段外，句子的其余部分保持不变。
+change_type 说明改动类型：negation=肯定与否定互换，number=修改数字或数量，time=修改时间或日期，entity=替换人物、机构、地点或事物，outcome=颠倒结果、因果或程度。
 要求：
-1. 只改动一处，其余措辞保持不变，改动后的句子通顺自然，长度与原句相近；
-2. 不要添加“据说”“可能”等模糊词，不要改变句子的标点结构；
-3. 只输出改动后的这一句话，不要任何解释。
+1. 替换后的句子通顺自然；
+2. 改动必须改变句子陈述的事实，不能是同义改写、补全残缺文字或修正错别字；
+3. 不要加入“据说”“可能”之类的模糊词，不要改动标点。
+只输出一个 JSON 对象。
 
 消息全文：
 {content}
 
 需要改动的句子：
 {sentence}""",
-    "en": """Below are a message and one of its sentences. Make one minimal factual edit to this sentence so that it states something that contradicts the original facts, e.g. turn an affirmation into a negation, change a number or a date, replace a person / organisation / place, or reverse a cause or an outcome.
+    "en": """Below are a message and one of its sentences. Make one minimal factual edit to this sentence so that it states a different fact from the original.
+How: pick one continuous span of the sentence, as short as possible, as original_span (it must match the text of the sentence exactly) and give the text that replaces it as new_span; everything else in the sentence stays unchanged.
+change_type names the kind of edit: negation = swap affirmation and negation, number = change a figure or quantity, time = change a time or date, entity = replace a person, organisation, place or thing, outcome = reverse a result, a cause or a degree.
 Requirements:
-1. Edit exactly one thing; keep the rest of the wording unchanged; the result must read naturally and be about as long as the original sentence.
-2. Do not add hedges such as "reportedly" or "may", and do not change the punctuation structure of the sentence.
-3. Output the edited sentence only, without any explanation.
+1. The sentence must read naturally after the replacement.
+2. The edit must change the fact the sentence states; it must not be a paraphrase, a completion of truncated text or a spelling fix.
+3. Do not add hedges such as "reportedly" or "may", and do not touch the punctuation.
+Output a single JSON object only.
 
 Full message:
 {content}
@@ -506,6 +513,17 @@ Full message:
 Sentence to edit:
 {sentence}""",
 }
+_TAMPER_SPAN_MAX = {"zh": 30, "en": 100}
+
+
+def tamper_schema(lang: str) -> Dict[str, Any]:
+    span = {"type": "string", "minLength": 1, "maxLength": _TAMPER_SPAN_MAX[lang]}
+    props = OrderedDict()
+    props["change_type"] = {"type": "string", "enum": TAMPER_TYPES}
+    props["original_span"] = dict(span)
+    props["new_span"] = dict(span)
+    return {"type": "object", "properties": props, "required": list(props.keys()),
+            "additionalProperties": False}
 
 
 def build_tamper(content: str, lang: str, item: Dict[str, Any]) -> Dict[str, Any]:
@@ -513,7 +531,33 @@ def build_tamper(content: str, lang: str, item: Dict[str, Any]) -> Dict[str, Any
     j = int(item["tamper_sent"])
     return {"system": TAMPER_SYSTEM[lang],
             "user": TAMPER_USER[lang].format(content=content, sentence=sents[j].strip()),
-            "prefix": "", "schema": None, "meta": {"sent": j}}
+            "prefix": "", "schema": tamper_schema(lang), "meta": {"sent": j}}
+
+
+def _content_chars(t: str) -> str:
+    """Letters and digits only, lower-cased: what must differ for an edit to be non-trivial."""
+    return "".join(ch for ch in t.lower() if ch.isalnum())
+
+
+def apply_tamper(sentence: str, raw: str) -> Optional[Dict[str, str]]:
+    """Apply the proposed span substitution to ``sentence``.
+
+    Returns {"new_sentence", "original_span", "new_span", "change_type"} or None when the
+    proposal is unusable: the span does not occur exactly once, or the substitution leaves the
+    alphanumeric content unchanged (punctuation / spacing / case edits).
+    """
+    try:
+        obj = json.loads(raw)
+        old, new, typ = str(obj["original_span"]), str(obj["new_span"]), str(obj["change_type"])
+    except (ValueError, KeyError, TypeError):
+        return None
+    if not old.strip() or not new.strip() or sentence.count(old) != 1:
+        return None
+    edited = sentence.replace(old, new, 1)
+    if _content_chars(edited) == _content_chars(sentence):
+        return None
+    return {"new_sentence": edited, "original_span": old, "new_span": new,
+            "change_type": typ if typ in TAMPER_TYPES else "entity"}
 
 
 def clean_generation(text: str) -> str:
@@ -538,7 +582,7 @@ TASKS = {
     "zs": (4, 0.0, True),
     "tc": (512, 0.2, False),
     "style": (700, 0.3, False),
-    "tamper": (200, 0.3, False),
+    "tamper": (160, 0.3, False),
 }
 
 

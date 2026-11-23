@@ -42,7 +42,8 @@ def _item(rng, i, split):
     return {
         "id": i, "split": split, "label": y, "content": "".join(sents), "sents": sents,
         "gpt": {"td": dict(rat(), acc=rng.randint(0, 1)), "cs": dict(rat(), acc=rng.randint(0, 1))},
-        "td": rat(), "cs": rat(), "tc": "Topic：" + _text(rng, 4), "zs": {"pred": y, "p_fake": 0.5},
+        "td": rat(), "cs": rat(), "tc": "Topic：" + _text(rng, 4),
+        "zs": {"pred": y, "p_fake": None if i % 7 == 0 else min(0.99, max(0.01, rng.gauss(0.6 if y else 0.4, 0.2)))},
         "clara": None if i == 5 else {"claims": claims, "overall": overall, "soft": True, "order": i % 2},
     }
 
@@ -111,7 +112,7 @@ def test_baselines(session, method, model):
     {"use_claims": False},
     {"use_overall": False},
     {"stance": "refute"}, {"stance": "support"}, {"stance": "none"},
-    {"use_v": False}, {"use_v0": False},
+    {"use_v": False}, {"use_v0": False}, {"v0_source": "fi"},
     {"gate": "none"}, {"gate": "instance"}, {"gate_fake": False},
     {"agg": "attention"}, {"agg": "max"}, {"agg": "mean"},
     {"use_global": False},
@@ -176,3 +177,71 @@ def test_replace_noise_eval(session):
     res = session.run("clara", seed=1, train=FAST, keep=True,
                       evals=[{"name": "noise50", "transform": "replace", "rate": 0.5, "seed": 0}])
     assert "noise50" in res["metrics"] and res["n_items"]["noise50"] == 16
+
+
+def test_path_evals_and_analysis(session, tmp_path, monkeypatch):
+    """Perturbed test sets given as dataset files, and the analyses that consume the predictions."""
+    import json
+
+    from clara import analysis
+    from clara.report import load_preds
+
+    rng = random.Random(3)
+    tam = []
+    for i in range(12):
+        it = _item(rng, 20_000_000 + 200 + i, "test")
+        it["label"] = 1
+        it["orig_id"] = 200 + i
+        it["tamper_sent"] = rng.randrange(len(it["sents"]))
+        tam.append(it)
+    tam_path = str(tmp_path / "tamper.json")
+    json.dump({"name": "toy-tamper", "lang": "zh", "llm": "synthetic", "items": tam},
+              open(tam_path, "w", encoding="utf-8"), ensure_ascii=False)
+    occ = [{"id": it["id"] * 100 + j, "split": "test", "label": 1, "orig_id": it["id"], "occl_sent": j,
+            "content": "".join(s for k, s in enumerate(it["sents"]) if k != j),
+            "sents": [s for k, s in enumerate(it["sents"]) if k != j]}
+           for it in tam for j in range(len(it["sents"]))]
+    occ_path = str(tmp_path / "occl.json")
+    json.dump({"name": "toy-occl", "lang": "zh", "llm": None, "items": occ},
+              open(occ_path, "w", encoding="utf-8"), ensure_ascii=False)
+
+    noise = {"name": "noise40", "transform": "replace", "rate": 0.4, "seed": 0}
+    specs = {"bert": ("bert", {}, [{"name": "tamper", "path": tam_path}, {"name": "occl", "path": occ_path}]),
+             "clara": ("clara", {}, [{"name": "tamper", "path": tam_path}, noise]),
+             "arg": ("arg", {"rationale_source": "llm"}, [noise]),
+             "clara_d": ("clara_d", {}, [{"name": "tamper", "path": tam_path}])}
+    runs = {}
+    for name, (method, model, evals) in specs.items():
+        runs[name] = {}
+        for seed in (1, 2):
+            res = session.run(method, seed=seed, model=model, train=FAST, teacher_train=FAST, evals=evals,
+                              pred_path=str(tmp_path / "outputs" / "runs" / "toy" / name / "s{}.npz".format(seed)))
+            assert res["n_items"]["tamper"] == 12 if "tamper" in res["n_items"] else True
+            runs[name][seed] = res
+    monkeypatch.setattr(analysis, "load_preds", lambda tag, name, seed: load_preds(tag, name, seed, root=str(tmp_path)))
+
+    ds_t = Dataset.load(tam_path)
+    loc = analysis.localisation(ds_t, "toy", {"BERT + occlusion": ("bert", runs["bert"]),
+                                               "CLARA": ("clara", runs["clara"]),
+                                               "CLARA-D": ("clara_d", runs["clara_d"])})
+    assert loc["BERT + occlusion"]["kind"] == "occlusion" and loc["CLARA"]["kind"] == "claims"
+    assert loc["CLARA-D"]["kind"] == "sentences"
+    for k in ("LLM suspicion scores", "BERT + occlusion", "CLARA", "CLARA-D"):
+        assert 0.0 <= loc[k]["hit@1"] <= 1.0 and loc[k]["n"] == 12
+    assert 0.0 < loc["CLARA"]["chance"] < 1.0
+
+    det = analysis.tamper_detection(ds_t, "toy", "clara", runs["clara"])
+    assert 0.0 <= det["pairwise_acc"] <= 1.0
+    gate = analysis.gate_analysis(session.ds, "toy", "clara", runs["clara"])
+    assert "overall/auc_gate" in gate and "real_claims/llm_acc" in gate
+    gn = analysis.gate_under_noise("toy", "clara", runs["clara"], "clara", rates=(40,))
+    assert 0.0 <= gn["clean"] <= 1.0 and 0.0 <= gn["corrupted"] <= 1.0
+    gn = analysis.gate_under_noise("toy", "arg", runs["arg"], "pair", rates=(40,))
+    assert 0.0 <= gn["clean"] <= 1.0
+    sel = analysis.selective_summary("toy", "clara", runs["clara"])
+    assert "maxprob" in sel and "selector" in sel and 0.0 <= sel["selector"]["aurc"] <= 1.0
+    cmp_ = analysis.compare("toy", runs["clara"], "clara", runs["bert"], "bert")
+    assert "bootstrap" in cmp_ and 0.0 <= cmp_["bootstrap"]["p"] <= 1.0
+    grid, curve = analysis.risk_coverage_curve("toy", "clara", runs["clara"], kind="selector")
+    assert len(grid) == len(curve) and np.all(np.isfinite(curve))
+    assert "alpha" in runs["clara"][1]["scalars"]

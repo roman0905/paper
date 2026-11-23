@@ -137,6 +137,8 @@ class Session:
             "history": summary["history"],
             "metrics": {s: evaluate(p) for s, p in preds.items()},
             "n_trainable": n_trainable(m),
+            # scalar parameters after training (fusion weights etc.), for transparency
+            "scalars": {k: float(v) for k, v in m.named_parameters() if v.ndim == 0},
             "n_items": {s: len(v) for s, v in splits.items()},
             "seconds": time.time() - t0,
         })

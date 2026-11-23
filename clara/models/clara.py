@@ -3,6 +3,8 @@
 Every news item x is a bag of instances: one holistic instance (the LLM's two-sided arguments and
 verdict about the message as a whole) followed by up to K atomic claims, each with the LLM's
 strongest supporting argument a+, strongest refuting argument a-, and a suspicion score v in [0,1].
+The holistic instance additionally carries a pre-argument holistic score v0 (the LLM's zero-shot
+P(fake) by default, see ``clara.data.instances``).
 
 For every instance k the adjudicator computes
 
@@ -48,7 +50,8 @@ from clara.models.layers import MLP, CrossAttention, MaskAttention, bce, logit
 
 DEFAULTS: Dict[str, Any] = dict(
     max_len=170, pair_len=128, claim_len=48, max_claims=6,
-    use_claims=True, use_overall=True, stance="both", use_v=True, use_v0=True, factorised=True,
+    use_claims=True, use_overall=True, stance="both", use_v=True, use_v0=True, v0_source="zs",
+    factorised=True,
     gate="claim", gate_fake=True, agg="noisy_or", use_global=True,
     lambda_mil=0.5, lambda_gate=0.3, eta=0.5, warmup=2, delta=0.05,
     hidden=384, dropout=0.2, inst_bias=-2.0,
@@ -101,7 +104,7 @@ class CLARA(Method):
         off, claim, sup, ref = [0], [], [], []
         v, v0, ent, typ, sent, valid = [], [], [], [], [], []
         for it in items:
-            inst = instances(it, lang, cfg["max_claims"])
+            inst = instances(it, lang, cfg["max_claims"], cfg["v0_source"])
             if not cfg["use_claims"]:
                 inst = inst[:1]
             elif not cfg["use_overall"] and len(inst) > 1:

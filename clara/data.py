@@ -53,8 +53,14 @@ class Dataset:
         return Dataset(self.name, self.lang, items, self.llm)
 
 
-def instances(item: Dict[str, Any], lang: str, max_claims: int = 6) -> List[Dict[str, Any]]:
+def instances(item: Dict[str, Any], lang: str, max_claims: int = 6,
+              v0_source: str = "zs") -> List[Dict[str, Any]]:
     """Instance list of one news item for CLARA: the holistic instance first, then the claims.
+
+    Every instance has the post-argument suspicion score ``v``.  The holistic instance has in
+    addition a pre-argument holistic score ``v0``: the LLM's plain zero-shot P(fake)
+    (``v0_source="zs"``, a separate one-token query) or the first impression stated at the start
+    of the structured call (``v0_source="fi"``); claims have ``v0 = v``.
 
     If the LLM output could not be parsed the item keeps only a neutral holistic instance, so the
     model falls back to its text-only branch for it.
@@ -64,8 +70,12 @@ def instances(item: Dict[str, Any], lang: str, max_claims: int = 6) -> List[Dict
         return [{"claim": OVERALL_CLAIM[lang], "support": "", "refute": "", "v": 0.5, "v0": 0.5,
                  "dist": None, "type": "overall", "sent": -1, "valid": False}]
     o = c["overall"]
+    v0 = o.get("v0", o["v"])
+    if v0_source == "zs":
+        p_zs = (item.get("zs") or {}).get("p_fake")
+        v0 = v0 if p_zs is None else p_zs
     out = [{"claim": OVERALL_CLAIM[lang], "support": o["support"], "refute": o["refute"],
-            "v": float(o["v"]), "v0": float(o.get("v0", o["v"])), "dist": o.get("dist"),
+            "v": float(o["v"]), "v0": float(v0), "dist": o.get("dist"),
             "type": "overall", "sent": -1, "valid": True}]
     for cl in c["claims"][:max_claims]:
         out.append({"claim": cl["claim"], "support": cl["support"], "refute": cl["refute"],
