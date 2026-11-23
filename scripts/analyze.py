@@ -191,6 +191,18 @@ def style_section(ds_style, tag, runs, chosen):
             out[base] = {k: ms(p[k] for p in per) for k in per[0]}
     if "clara" not in out:
         raise Missing("no style predictions for CLARA")
+    # is any method better than BERT on the rewritten texts?  (same items, common seeds)
+    keep = {i for i, r in rew.items() if r}
+    out["_vs_bert"] = {}
+    for base in MAIN + EXTRA:
+        if base in ("bert",) or base not in out or "bert" not in chosen:
+            continue
+        ra, rb = runs[chosen[base]], runs[chosen["bert"]]
+        common = sorted(set(ra) & set(rb))
+        c = A.compare(tag, {s: ra[s] for s in common}, chosen[base], {s: rb[s] for s in common}, chosen["bert"],
+                      split="style", keep=keep)
+        if c:
+            out["_vs_bert"][base] = c
     return out
 
 
@@ -396,6 +408,29 @@ def live_section(D, llm, runs, chosen):
     return out
 
 
+def official_arg_section(D, runs, res):
+    """Test macro-F1 of the official ARG code next to our re-implementation with the same inputs
+    (released GPT-3.5 rationales, learning rate of the official script)."""
+    path = os.path.join(ROOT, "results", "official_arg.json")
+    if D != "ARG-CN" or not os.path.exists(path):
+        raise Missing("no official ARG runs for " + D)
+    off = json.load(open(path, encoding="utf-8"))["runs"]
+    vals = [v["macf1"] for v in off.values()]
+    out = {"s" + k: v["macf1"] for k, v in off.items()}
+    out.update({"n": len(vals), "mean": float(np.mean(vals)), "spread": float(max(vals) - min(vals))})
+    ours = runs.get("arg_gpt@lr2e-05")
+    if ours:
+        out["ours_cached"] = ms(r["metrics"]["test"]["macf1"] for r in ours.values())
+        out["gap_cached"] = out["mean"] - out["ours_cached"]["mean"]
+    live = res.get("live", {}).get("arg_gpt@lr2e-05")
+    if live:
+        out["ours_live"] = live["live"]
+        out["gap_live"] = out["mean"] - live["live"]["mean"]
+        if "fp32" in live:
+            out["ours_fp32"] = live["fp32"]
+    return out
+
+
 def cost_section(D, llm):
     llm_dir = os.path.join(ROOT, "outputs", "llm", llm)
     out = {"tokens": {}}
@@ -557,6 +592,9 @@ def derived_section(res):
     put("clara_minus_lora_same_seeds", lambda: sig["lora"]["diff_mean"])
     put("argswap_minus_clara_item100", lambda: -nsig["noise100/arg_swap"]["diff_mean"])
     put("arg_minus_clara_item100", lambda: -nsig["noise100/arg"]["diff_mean"])
+    style = res.get("style", {})
+    for b in ("lora", "clara", "bert", "arg", "factguard", "bert_zs"):
+        put(b + "_style_drop", lambda b=b: -style[b]["delta"]["mean"])
     sel = res.get("selective", {})
     put("selector_aurc_gain", lambda: sel["clara"]["maxprob"]["aurc"] - sel["clara"]["selector"]["aurc"])
     if not out:
@@ -646,6 +684,7 @@ def main():
         section("lambda_gate", lambda: sweep_section(runs, chosen, r"clara-lgate([\d.]+)$", "lambda_gate"))
         section("lodo", lambda: lodo_section(D, args.llm, chosen))
         section("live", lambda: live_section(D, args.llm, runs, chosen))
+        section("official_arg", lambda: official_arg_section(D, runs, res))
         section("cross", lambda: cross_section(D, args.llm, ds, load_extra("tamper"), chosen))
         section("distill", lambda: distill_section(runs, chosen))
         section("llm2", lambda: llm2_section(D, chosen, args.llm2, runs))

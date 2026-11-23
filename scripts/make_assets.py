@@ -160,11 +160,11 @@ def tab_ablation(A):
                 cells += ["--"] * 3
                 continue
             cells.append(pm(r["test"]) + ("$^{*}$" if both_sig(r.get("vs_full")) else ""))
-            for key in ("noise100", "unit100"):
-                if key not in r:
+            for cond in ("noise100", "unit100"):      # (must not reuse the name of the outer loop variable)
+                if cond not in r:
                     cells.append("--")
                     continue
-                cells.append(pm(r[key]) + ("$^{*}$" if both_sig(r.get("vs_full_" + key)) else ""))
+                cells.append(pm(r[cond]) + ("$^{*}$" if both_sig(r.get("vs_full_" + cond)) else ""))
         if any(c != "--" for c in cells):
             out.append(label + " & " + " & ".join(cells) + r" \\")
     if out[-1] == r"\midrule":

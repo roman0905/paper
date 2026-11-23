@@ -67,18 +67,31 @@ def paired_bootstrap(y: np.ndarray, probs_a: List[np.ndarray], probs_b: List[np.
 
 
 def compare(tag: str, runs_a: Runs, name_a: str, runs_b: Runs, name_b: str,
-            split: str = "test") -> Dict[str, float]:
-    """A vs B on ``split``: Welch test over seeds and paired bootstrap over items."""
-    fa = [r["metrics"][split]["macf1"] for r in runs_a.values()]
-    fb = [r["metrics"][split]["macf1"] for r in runs_b.values()]
-    out = {"diff_mean": float(np.mean(fa) - np.mean(fb)), "welch_p": welch(fa, fb)}
+            split: str = "test", keep: Optional[set] = None) -> Dict[str, float]:
+    """A vs B on ``split``: Welch test over seeds and paired bootstrap over items.
+
+    ``keep`` restricts the comparison to a set of item ids (the per-seed scores are then recomputed
+    from the stored predictions instead of being read from the result files)."""
     pa = [load_preds(tag, name_a, s) for s in sorted(runs_a)]
     pb = [load_preds(tag, name_b, s) for s in sorted(runs_b)]
-    if all(p is not None and split + "/prob" in p for p in pa + pb):
+    have = all(p is not None and split + "/prob" in p for p in pa + pb)
+    if keep is None:
+        fa = [r["metrics"][split]["macf1"] for r in runs_a.values()]
+        fb = [r["metrics"][split]["macf1"] for r in runs_b.values()]
+    elif not have:
+        return {}
+    else:
+        m = np.array([int(i) in keep for i in pa[0][split + "/id"]])
+        y_ = pa[0][split + "/label"][m]
+        fa = [float(_macf1_rows(y_[None], (p[split + "/prob"][m] >= 0.5)[None])[0]) for p in pa]
+        fb = [float(_macf1_rows(y_[None], (p[split + "/prob"][m] >= 0.5)[None])[0]) for p in pb]
+    out = {"diff_mean": float(np.mean(fa) - np.mean(fb)), "welch_p": welch(fa, fb)}
+    if have:
         ids = pa[0][split + "/id"]
         assert all(np.array_equal(p[split + "/id"], ids) for p in pa + pb), "predictions are not item-aligned"
-        y = pa[0][split + "/label"]
-        out["bootstrap"] = paired_bootstrap(y, [p[split + "/prob"] for p in pa], [p[split + "/prob"] for p in pb])
+        m = np.ones(len(ids), dtype=bool) if keep is None else np.array([int(i) in keep for i in ids])
+        y = pa[0][split + "/label"][m]
+        out["bootstrap"] = paired_bootstrap(y, [p[split + "/prob"][m] for p in pa], [p[split + "/prob"][m] for p in pb])
     return out
 
 
