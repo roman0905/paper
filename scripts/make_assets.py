@@ -398,6 +398,26 @@ def tab_lodo(A):
     return "\n".join(out) + "\n"
 
 
+def tab_cross(A):
+    """Relevance gate on analyses that are on topic but unfaithful in one place."""
+    f3 = lambda x: "{:.3f}".format(x)
+    out = [r"\begin{tabular}{lcccccc}", r"\toprule",
+           r" & \multicolumn{3}{c}{" + DS_LABEL["ARG-CN"] + r"} & \multicolumn{3}{c}{" + DS_LABEL["ARG-EN"] + r"} \\",
+           r"\cmidrule(lr){2-4}\cmidrule(lr){5-7}",
+           r"篡改后的文本搭配 & 被改句的声明 & 其余声明 & 整体实例 & 被改句的声明 & 其余声明 & 整体实例 \\", r"\midrule"]
+    for key, label in (("tamper", "它自己的分析"), ("cross", "原文的分析（一处与文本不符）")):
+        cells = []
+        for D in DS:
+            c = A[D]["cross"]
+            cells += [f3(c[key + "/r_edited_sentence"]), f3(c[key + "/r_other_claims"]), f3(c[key + "/r_overall"])]
+        out.append(label + " & " + " & ".join(cells) + r" \\")
+    out.append(r"\midrule")
+    out.append("AUC：$r$ $\\rightarrow$ 声明是否仍与文本相符 & " + " & ".join(
+        r"\multicolumn{3}{c}{" + f3(A[D]["cross"]["cross/auc_r_unfaithful"]) + "}" for D in DS) + r" \\")
+    out += [r"\bottomrule", r"\end{tabular}"]
+    return "\n".join(out) + "\n"
+
+
 def tab_distill(A):
     rows = [("bert", "BERT（同样的 3 个种子）"), ("arg_d", "ARG-D"), ("factguard_d", "FactGuard-D"),
             ("clara_d", r"\student{}"), ("clara_d-no_inst", r"\student{}：去掉实例级蒸馏"),
@@ -815,6 +835,8 @@ def _leaves(obj, path):
         return
     elif isinstance(obj, (int, float)):
         yield "/".join(path), float(obj)
+    elif isinstance(obj, list) and path[-1].endswith("seeds"):
+        yield "/".join(path[:-1] + [path[-1] + "_count"]), float(len(obj))
 
 
 def write_numbers(A):
@@ -860,7 +882,7 @@ def main():
                      ("loc", tab_loc), ("loc_type", tab_loc_type), ("tamper", tab_tamper), ("lodo", tab_lodo),
                      ("selective", tab_selective), ("cost", tab_cost), ("train_cost", tab_train_cost),
                      ("grid", tab_grid), ("sig", tab_sig), ("live", tab_live), ("cases", tab_cases),
-                     ("llm2", tab_llm2), ("distill", tab_distill)]:
+                     ("llm2", tab_llm2), ("distill", tab_distill), ("cross", tab_cross)]:
         table(name, fn, A)
     write_prompts()
     figure("noise", fig_noise, A)

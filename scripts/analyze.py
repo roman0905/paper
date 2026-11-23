@@ -42,8 +42,9 @@ def need(runs, name):
 
 
 def ms(values):
+    values = list(values)        # callers pass generators: materialise before using it twice
     m, s = stat(values)
-    return {"mean": m, "std": s, "n": len(list(values))}
+    return {"mean": m, "std": s, "n": len(values)}
 
 
 # ----------------------------------------------------------------------------------------------
@@ -311,9 +312,10 @@ def ablation_section(tag, runs, chosen, ds_tamper=None):
     names = [full_name] + sorted(n for n in runs if n.startswith("clara-") and not re.match(SWEEP_RE, n))
     if len(names) == 1:
         raise Missing("no ablation runs")
-    out = {}
+    abl_seeds = set.intersection(*[set(runs[n]) for n in names[1:]])
+    out = {"_seeds": sorted(abl_seeds)}
     for n in names:
-        seeds = runs[n]
+        seeds = {s: r for s, r in runs[n].items() if s in abl_seeds}
         row = {"test": ms(r["metrics"]["test"]["macf1"] for r in seeds.values()),
                "val": ms(r["metrics"]["val"]["macf1"] for r in seeds.values()),
                "auc": ms(r["metrics"]["test"]["auc"] for r in seeds.values())}

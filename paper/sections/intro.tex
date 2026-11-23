@@ -14,7 +14,7 @@
 实验结果并不都支持本文最初的设想，我们如实报告。
 \begin{enumerate}
 \item \textbf{分布内精度持平。} \method{} 在 Weibo21 与 GossipCop 上的 macro-F1 为 \ptwo{CN/main/clara/macf1} 与 \ptwo{EN/main/clara/macf1}，与 ARG（\ptwo{CN/main/arg/macf1} 与 \ptwo{EN/main/arg/macf1}）没有显著差异。BERT 加零样本评分这一最简单的做法达到 \ptwo{CN/main/bert_zs/macf1} 与 \ptwo{EN/main/bert_zs/macf1}，不逊于任何一种让 SLM 阅读 LLM 理由的结构。在多种子设置下，已发表工作之间约 1 个点的差距落在随机波动之内。
-\item \textbf{提升来自 LLM 的评分，而不是论证文本。} 消融显示，去掉全部论证文本、只保留评分，\method{} 的精度不变；去掉评分、只保留论证文本，则降到 BERT 的水平以下。声明分解与判定门控对精度同样没有可测的贡献。本文方法的核心设想——让小模型阅读并裁决声明级的正反论证——在分布内精度上没有得到支持。
+\item \textbf{论证文本、声明分解与判定门控对精度没有可测的贡献。} 消融显示，去掉全部论证文本、去掉声明分解或去掉判定门控，\method{} 在两个数据集上的精度都没有显著变化。在 Weibo21 上，\method{} 相对 BERT 的提升几乎全部来自 LLM 的数值评分：去掉评分、只保留论证文本，精度降到 BERT 以下。本文方法的核心设想是让小模型阅读并裁决声明级的正反论证，这一设想在分布内精度上没有得到支持。
 \item \textbf{相关性门控有效，但带来的稳健性并非独有。} 它区分“属于本新闻的分析单元”与“被替换进来的单元”的 AUC 超过 0.98，使 \method{} 在分析被整条替换时退回到接近纯文本模型的水平；去掉它，在 Weibo21 上模型在同样条件下比 BERT 低 \pone{CN/derived/no_relevance_gap} 个点。当只有声明被替换时，\method{} 可以丢弃声明、保留整体判断，在 Weibo21 上不损失精度。但在同等条件的整条替换下，ARG 本身已相当稳健，与 \method{} 没有差别。
 \item \textbf{“LLM 是否可靠”在闭卷条件下学不出来。} 判定门控跟随的是新闻标签，而不是 LLM 判断的正误。ARG 的理由可用性预测器同样没有提供分类器自身预测之外的信息。
 \item \textbf{所有闭卷检测器都主要依赖文风。} 把假新闻改写成通稿文风、真新闻改写成营销号文风后，Weibo21 上所有 SLM 类方法的 macro-F1 降到 51--53。LLM 自身也是如此：其零样本判断的 AUC 从 \pone{CN/style_llm/zero-shot P(fake)/auc_orig} 降到 \pone{CN/style_llm/zero-shot P(fake)/auc_style}。把分析拆到声明一级并不能改变这一点。
