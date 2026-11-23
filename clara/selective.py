@@ -16,7 +16,7 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 
-from clara.metrics import selective_metrics
+from clara.metrics import confidence_order, selective_metrics
 
 
 def _sigmoid(x):
@@ -42,8 +42,17 @@ def features(pred: Dict[str, np.ndarray], split: str) -> Optional[np.ndarray]:
 
 def evaluate(pred: Dict[str, np.ndarray], test: str = "test") -> Dict[str, Dict[str, float]]:
     """Selective-prediction metrics of one run for MaxProb and, if available, the fitted selector."""
-    y, p = pred[test + "/label"], pred[test + "/prob"]
+    y, p = pred[test + "/label"], pred[test + "/prob"].astype(np.float64)
     out = {"maxprob": selective_metrics(y, p, np.abs(p - 0.5))}
+    # which side are the most confident predictions on, and how accurate is each side?
+    top = confidence_order(np.abs(p - 0.5))[: max(1, int(round(0.1 * len(y))))]
+    fake_side = p[top] >= 0.5
+    correct = (p[top] >= 0.5) == (y[top] == 1)
+    out["maxprob"]["top10_fake_share"] = float(fake_side.mean())
+    if fake_side.any():
+        out["maxprob"]["top10_acc_fake_side"] = float(correct[fake_side].mean())
+    if (~fake_side).any():
+        out["maxprob"]["top10_acc_real_side"] = float(correct[~fake_side].mean())
     fv, ft = features(pred, "val"), features(pred, test)
     if fv is not None:
         yv, pv = pred["val/label"], pred["val/prob"]

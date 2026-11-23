@@ -14,7 +14,7 @@
 实验结果并不都支持本文最初的设想，我们如实报告。
 \begin{enumerate}
 \item \textbf{分布内精度持平。} \method{} 在 Weibo21 与 GossipCop 上的 macro-F1 为 \ptwo{CN/main/clara/macf1} 与 \ptwo{EN/main/clara/macf1}，与 ARG（\ptwo{CN/main/arg/macf1} 与 \ptwo{EN/main/arg/macf1}）没有显著差异。BERT 加零样本评分这一最简单的做法达到 \ptwo{CN/main/bert_zs/macf1} 与 \ptwo{EN/main/bert_zs/macf1}，不逊于任何一种让 SLM 阅读 LLM 理由的结构。在多种子设置下，已发表工作之间约 1 个点的差距落在随机波动之内。
-\item \textbf{相关性门控有效，适用范围有限。} 它区分“属于本新闻的分析单元”与“被替换进来的单元”的 AUC 超过 0.98，使 \method{} 在分析被替换时退回到接近纯文本模型的水平；去掉它，在 Weibo21 上模型在同样条件下比 BERT 低 \pone{CN/derived/no_relevance_gap} 个点。在 Weibo21 上，当分析中的声明被逐条替换时，\method{} 显著优于 ARG。但 ARG 本身对整条替换已相当稳健，给它加上同样的错配负例后与 \method{} 相当。
+\item \textbf{相关性门控有效，适用范围有限。} 它区分“属于本新闻的分析单元”与“被替换进来的单元”的 AUC 超过 0.98，使 \method{} 在分析被替换时退回到接近纯文本模型的水平；去掉它，在 Weibo21 上模型在同样条件下比 BERT 低 \pone{CN/derived/no_relevance_gap} 个点。在 Weibo21 上，当分析中的声明全部被逐条替换时，\method{} 比 ARG 高 \ptwo{CN/noise_sig/unit100/arg/diff_mean} 个点（对测试样本的检验显著，对随机种子的检验处于边缘）；GossipCop 上没有这一优势。ARG 本身对整条替换已相当稳健，给它加上同样的错配负例后，在整条替换下与 \method{} 相当。
 \item \textbf{“LLM 是否可靠”在闭卷条件下学不出来。} 判定门控跟随的是新闻标签，而不是 LLM 判断的正误。ARG 的理由可用性预测器同样没有提供分类器自身预测之外的信息。
 \item \textbf{所有闭卷检测器都主要依赖文风。} 把假新闻改写成通稿文风、真新闻改写成营销号文风后，Weibo21 上所有 SLM 类方法的 macro-F1 降到 51--53。LLM 自身也是如此：其零样本判断的 AUC 从 \pone{CN/style_llm/zero-shot P(fake)/auc_orig} 降到 \pone{CN/style_llm/zero-shot P(fake)/auc_style}。把分析拆到声明一级并不能改变这一点。
 \item \textbf{对局部事实改动不敏感。} 把真新闻中的一句话改成与原文事实不符的陈述，各方法的预测几乎不变；声明级的定位只略高于随机。

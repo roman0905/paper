@@ -12,7 +12,7 @@ from sklearn.metrics import roc_auc_score
 
 from clara import selective
 from clara.data import Dataset, instances
-from clara.metrics import localisation_metrics
+from clara.metrics import confidence_order, localisation_metrics
 from clara.report import load_preds, stat
 
 Runs = Dict[int, Dict[str, Any]]          # seed -> result of one experiment
@@ -485,7 +485,7 @@ def risk_coverage_curve(tag: str, name: str, runs: Runs, kind: str = "maxprob",
     from sklearn.pipeline import make_pipeline
     from sklearn.preprocessing import StandardScaler
 
-    grid = np.linspace(0.5, 1.0, 26) if grid is None else grid
+    grid = np.linspace(0.1, 1.0, 46) if grid is None else grid
     curves = []
     for seed in sorted(runs):
         pred = load_preds(tag, name, seed)
@@ -500,7 +500,7 @@ def risk_coverage_curve(tag: str, name: str, runs: Runs, kind: str = "maxprob",
             cv = ((pred["val/prob"] >= 0.5).astype(int) == pred["val/label"]).astype(int)
             sel = make_pipeline(StandardScaler(), LogisticRegression(C=1.0, max_iter=1000)).fit(fv, cv)
             conf = sel.predict_proba(ft)[:, 1]
-        correct = ((p >= 0.5).astype(int) == y).astype(float)[np.argsort(-conf, kind="stable")]
+        correct = ((p >= 0.5).astype(int) == y).astype(float)[confidence_order(conf)]
         cum = np.cumsum(correct) / np.arange(1, len(y) + 1)
         curves.append([cum[max(1, int(round(c * len(y)))) - 1] for c in grid])
     return grid, (np.mean(curves, axis=0) if curves else np.full(len(grid), np.nan))

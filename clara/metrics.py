@@ -42,10 +42,20 @@ def ece(y_true: Sequence[int], prob: Sequence[float], n_bins: int = 15) -> float
     return float(total)
 
 
+def confidence_order(confidence: Sequence[float], seed: int = 0) -> np.ndarray:
+    """Indices sorted by decreasing confidence; ties are broken at random (fixed seed).
+
+    Saturated probabilities produce exact ties, and the test files are sorted by label, so breaking
+    ties by position would make risk-coverage numbers depend on the order of the data."""
+    conf = np.asarray(confidence, dtype=np.float64)
+    perm = np.random.RandomState(seed).permutation(len(conf))
+    return perm[np.argsort(-conf[perm], kind="stable")]
+
+
 def risk_coverage(correct: Sequence[float], confidence: Sequence[float]) -> Tuple[np.ndarray, np.ndarray]:
     """Risk (error rate) as a function of coverage when abstaining on the least confident items."""
     c = np.asarray(correct, dtype=np.float64)
-    order = np.argsort(-np.asarray(confidence, dtype=np.float64), kind="stable")
+    order = confidence_order(confidence)
     c = c[order]
     n = len(c)
     cov = np.arange(1, n + 1) / n
@@ -68,7 +78,7 @@ def eaurc(correct: Sequence[float], confidence: Sequence[float]) -> float:
 
 
 def selective_metrics(y_true: Sequence[int], prob: Sequence[float], confidence: Sequence[float],
-                      coverages: Sequence[float] = (0.9, 0.8, 0.7)) -> Dict[str, float]:
+                      coverages: Sequence[float] = (0.9, 0.8, 0.7, 0.5, 0.2, 0.1)) -> Dict[str, float]:
     """AURC / E-AURC plus accuracy and macro-F1 on the retained items at fixed coverages."""
     y = np.asarray(y_true).astype(int)
     p = np.asarray(prob, dtype=np.float64)
@@ -76,13 +86,14 @@ def selective_metrics(y_true: Sequence[int], prob: Sequence[float], confidence: 
     pred = (p >= 0.5).astype(int)
     correct = (pred == y).astype(np.float64)
     out = {"aurc": aurc(correct, conf), "eaurc": eaurc(correct, conf)}
-    order = np.argsort(-conf, kind="stable")
+    order = confidence_order(conf)
     for cv in coverages:
         k = max(1, int(round(cv * len(y))))
         keep = order[:k]
         tag = "{:d}".format(int(round(cv * 100)))
         out["acc@" + tag] = float(correct[keep].mean())
         out["macf1@" + tag] = float(f1_score(y[keep], pred[keep], average="macro", zero_division=0))
+    out["acc@100"] = float(correct.mean())
     return out
 
 

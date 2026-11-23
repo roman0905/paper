@@ -12,13 +12,13 @@
 \end{table}
 
 \paragraph{\method{} 与已有的 LLM+SLM 方法持平，没有稳定的优势}
-在 Weibo21 上 \method{} 的 macro-F1 为 \ptwo{CN/main/clara/macf1}，与 ARG（\ptwo{CN/main/arg/macf1}）几乎相同，高于 FactGuard（\ptwo{CN/main/factguard/macf1}）与 BERT（\ptwo{CN/main/bert/macf1}）约 1 个点。在 GossipCop 上 \method{} 为 \ptwo{EN/main/clara/macf1}，在 SLM 类方法中最高，比 ARG 高 \ptwo{EN/significance/arg/diff_mean} 个点。但配对 bootstrap 检验（附录表~\ref{tab:sig}）显示，在两个数据集共十组与 SLM 类方法的比较中，只有 Weibo21 上对 FactGuard 的一组在 0.05 水平上显著（$p=\fthree{CN/significance/factguard/bootstrap/p}$，未做多重比较校正）；对 BERT 的提升在两个数据集上处于显著性边缘（$p=\fthree{CN/significance/bert/bootstrap/p}$ 与 $\fthree{EN/significance/bert/bootstrap/p}$）。分布内精度不是 \method{} 的优势所在。
+在 Weibo21 上 \method{} 的 macro-F1 为 \ptwo{CN/main/clara/macf1}，与 ARG（\ptwo{CN/main/arg/macf1}）几乎相同，高于 FactGuard（\ptwo{CN/main/factguard/macf1}）与 BERT（\ptwo{CN/main/bert/macf1}）约 1 个点。在 GossipCop 上 \method{} 为 \ptwo{EN/main/clara/macf1}，在 SLM 类方法中最高，比 ARG 高 \ptwo{EN/significance/arg/diff_mean} 个点。附录表~\ref{tab:sig} 给出两种检验的结果。在两个数据集上与 BERT、BERT+ZS、ARG（两种理由来源）和 FactGuard 的共十组比较中，按 \ref{sec:protocol} 节的标准只有 Weibo21 上对 FactGuard 的一组成立（$p_{\text{样本}}=\fthree{CN/significance/factguard/bootstrap/p}$，$p_{\text{种子}}=\fthree{CN/significance/factguard/welch_p}$），而且两个 $p$ 值都贴近 0.05、未做多重比较校正，证据很弱。对 BERT 的提升在 Weibo21 上只有对种子的检验成立（$p_{\text{种子}}=\fthree{CN/significance/bert/welch_p}$，$p_{\text{样本}}=\fthree{CN/significance/bert/bootstrap/p}$），在 GossipCop 上两者都不成立（\fthree{EN/significance/bert/welch_p} 与 \fthree{EN/significance/bert/bootstrap/p}）。分布内精度不是 \method{} 的优势所在。
 
 \paragraph{最简单的融合方式同样有效}
 BERT+ZS 只在 BERT 的输出上加了一项 LLM 零样本评分，在 Weibo21 上达到 \ptwo{CN/main/bert_zs/macf1}，是 SLM 类方法中最高的；在 GossipCop 上为 \ptwo{EN/main/bert_zs/macf1}，与 ARG、FactGuard 相当。也就是说，在分布内精度这一指标上，让 SLM 阅读 LLM 的理由文本并没有比直接使用一个 LLM 置信度分数带来更多收益。ARG、FactGuard 与 TED 的对比实验中都没有这一对照。
 
-\paragraph{直接微调 LLM 更强}
-LoRA-LLM 在 Weibo21 上的 macro-F1 为 \ptwo{CN/main/lora/macf1}，在 GossipCop 上为 \ptwo{EN/main/lora/macf1}。它只需要一次前向、不需要生成任何文本，代价是训练与推理都要运行 7B 模型（\ref{sec:exp-cost} 节）。把 LLM 冻结、只训练小模型的协同范式，在本文的设置下没有达到直接微调同一个 LLM 的精度。
+\paragraph{直接微调 LLM：在 Weibo21 上更强，在 GossipCop 上没有优势}
+LoRA-LLM 在 Weibo21 上的 macro-F1 为 \ptwo{CN/main/lora/macf1}（3 个种子），比 \method{} 高 \ptwo{CN/derived/lora_minus_clara} 个点，比 BERT 高 \ptwo{CN/derived/lora_minus_bert} 个点。在相同的三个种子上它比 \method{} 高 \ptwo{CN/derived/lora_minus_clara_same_seeds} 个点，对测试样本的检验显著（$p_{\text{样本}}<0.001$），对种子的检验处于边缘（$p_{\text{种子}}=\fthree{CN/significance/lora/welch_p}$）：LoRA-LLM 三个种子间的标准差达 \ptwo{CN/main/lora/macf1_std}。在 GossipCop 上它为 \ptwo{EN/main/lora/macf1}，与各 SLM 类方法处于同一水平，在相同种子上比 \method{} 低 \ptwo{EN/derived/clara_minus_lora_same_seeds} 个点（$p_{\text{样本}}=\fthree{EN/significance/lora/bootstrap/p}$，$p_{\text{种子}}=\fthree{EN/significance/lora/welch_p}$），尽管它在验证集上高出约 2 个点。LoRA-LLM 推理时只需一次前向、不生成任何文本，代价是训练与推理都要运行 7B 模型（\ref{sec:exp-cost} 节）。把 LLM 冻结、只训练小模型的协同范式，在本文的设置下没有稳定地超过直接微调同一个 LLM。
 
 \paragraph{与已发表数值的关系}
 ARG 论文在同样的数据上报告的 macro-F1 为 78.4（Weibo21）与 79.0（GossipCop），FactGuard 论文报告的是 80.1 与 80.5，TED 为 79.5 与 80.3。本文复现的数值更低，原因有三：其一，这些数值来自单次运行；其二，本文把理由换成了 7B 开源模型的输出；其三，实现上可能存在小的系统差异。为了量化第三点，我们在本机运行了 ARG 的官方代码（仅做库版本兼容性修改，使用其发布的配置与 GPT-3.5 理由）：官方种子得到 78.0，另一个种子得到 77.5；本文的实现在相同的输入与学习率下，5 个种子的均值为 \ptwo{CN/grid/arg_gpt@lr2e-05/test/mean}，每步重算冻结层时 3 个种子的均值为 \ptwo{CN/live/arg_gpt@lr2e-05/live/mean}（附录~\ref{app:live}）。与官方代码两次运行的均值分别相差约 1.1 与 0.7 个点。官方代码自身两个种子之间相差 0.5 个点，因此这一差距与种子波动同一量级，但不能排除存在小的系统差。由于所有方法共用同一套实现与协议，方法之间的比较不受影响。值得注意的是，官方代码的两次运行都没有达到论文报告的 78.4，在本文的多种子设置下，这些方法之间约 1 个点的已发表差距处于随机波动范围之内。
@@ -53,10 +53,10 @@ ARG 论文在同样的数据上报告的 macro-F1 为 78.4（Weibo21）与 79.0�
 消融实验（表~\ref{tab:ablation}）中“去掉相关性门控与错配负例”的变体，在全部分析被整条替换时，Weibo21 上的 macro-F1 从 \ptwo{CN/ablation/full/noise100/mean} 降到 \ptwo{CN/ablation/no_relevance/noise100/mean}，远低于不使用 LLM 的 BERT。加入相关性门控后，\method{} 在同样条件下保持在 \ptwo{CN/noise/clara/item/100/mean}（Weibo21）与 \ptwo{EN/noise/clara/item/100/mean}（GossipCop），比 BERT 低约 1 个点。
 
 \paragraph{单元替换是声明级结构有优势的地方}
-当分析中只有一部分单元被替换时，\method{} 可以逐条丢弃无关的声明、保留其余部分。在 Weibo21 上，即使全部声明都被替换，\method{} 的 macro-F1 仍为 \ptwo{CN/noise/clara/unit/100/mean}，与未替换时（\ptwo{CN/noise/clara/unit/0/mean}）持平：此时裁决器依靠未被替换的整体判断与文本分支。ARG 在同样条件下从 \ptwo{CN/noise/arg/unit/0/mean} 降到 \ptwo{CN/noise/arg/unit/100/mean}，两者在该条件下的差异显著（配对 bootstrap，$p=\fthree{CN/noise_sig/unit100/arg/bootstrap/p}$）。GossipCop 上没有这一优势：\method{} 从 \ptwo{EN/noise/clara/unit/0/mean} 降到 \ptwo{EN/noise/clara/unit/100/mean}，降幅大于 ARG（\ptwo{EN/noise/arg/unit/0/mean} 降到 \ptwo{EN/noise/arg/unit/100/mean}），两者最终水平相当。
+当分析中只有一部分单元被替换时，\method{} 可以逐条丢弃无关的声明、保留其余部分。在 Weibo21 上，即使全部声明都被替换，\method{} 的 macro-F1 仍为 \ptwo{CN/noise/clara/unit/100/mean}，与未替换时（\ptwo{CN/noise/clara/unit/0/mean}）持平：此时裁决器依靠未被替换的整体判断与文本分支。ARG 在同样条件下从 \ptwo{CN/noise/arg/unit/0/mean} 降到 \ptwo{CN/noise/arg/unit/100/mean}。在该条件下 \method{} 比 ARG 高 \ptwo{CN/noise_sig/unit100/arg/diff_mean} 个点，对测试样本的检验显著（$p_{\text{样本}}=\fthree{CN/noise_sig/unit100/arg/bootstrap/p}$），对种子的检验处于边缘（$p_{\text{种子}}=\fthree{CN/noise_sig/unit100/arg/welch_p}$）；比加了错配负例的 ARG 高 \ptwo{CN/noise_sig/unit100/arg_swap/diff_mean} 个点，两种检验都成立（\fthree{CN/noise_sig/unit100/arg_swap/bootstrap/p} 与 \fthree{CN/noise_sig/unit100/arg_swap/welch_p}）。GossipCop 上没有这一优势：\method{} 从 \ptwo{EN/noise/clara/unit/0/mean} 降到 \ptwo{EN/noise/clara/unit/100/mean}，降幅大于 ARG（\ptwo{EN/noise/arg/unit/0/mean} 降到 \ptwo{EN/noise/arg/unit/100/mean}），两者最终水平相当。
 
 \paragraph{需要如实说明的两点}
-第一，ARG 本身对替换就相当稳健：整条替换全部理由后，它在两个数据集上只下降 1.3--1.7 个点。它的融合权重并不能识别被替换的理由（被替换与未被替换样本上的平均权重几乎相同，区分两者的 AUC 为 \fthree{CN/gate/weights_under_noise/arg/auc} 与 \fthree{EN/gate/weights_under_noise/arg/auc}），稳健性来自新闻文本在其表示中占主导。给 ARG 加上同样的错配负例训练后，它在整条替换下略好于 \method{}。因此，“在分析不可用时保持稳健”并不是 \method{} 独有的性质；\method{} 相对 ARG 的可测优势只出现在 Weibo21 的单元替换上。第二，FactGuard 对两种替换都非常敏感（整条替换全部分析后降到 \ptwo{CN/noise/factguard/item/100/mean} 与 \ptwo{EN/noise/factguard/item/100/mean}），因为它用 LLM 抽取的 topic-content 代替新闻原文参与交叉注意力。
+第一，ARG 本身对替换就相当稳健：整条替换全部理由后，它在两个数据集上只下降 1.3--1.7 个点。它的融合权重并不能识别被替换的理由（被替换与未被替换样本上的平均权重几乎相同，区分两者的 AUC 为 \fthree{CN/gate/weights_under_noise/arg/auc} 与 \fthree{EN/gate/weights_under_noise/arg/auc}），稳健性来自新闻文本在其表示中占主导。给 ARG 加上同样的错配负例训练后，它在全部分析被整条替换时比 \method{} 高 \ptwo{CN/derived/argswap_minus_clara_item100}（Weibo21）与 \ptwo{EN/derived/argswap_minus_clara_item100}（GossipCop）个点，差异不显著。因此，“在分析不可用时保持稳健”并不是 \method{} 独有的性质；\method{} 相对 ARG 的可测优势只出现在 Weibo21 的单元替换上。第二，FactGuard 对两种替换都非常敏感（整条替换全部分析后降到 \ptwo{CN/noise/factguard/item/100/mean} 与 \ptwo{EN/noise/factguard/item/100/mean}），因为它用 LLM 抽取的 topic-content 代替新闻原文参与交叉注意力。
 
 \subsection{判定门控学到了什么}\label{sec:exp-gate}
 
@@ -131,7 +131,7 @@ LLM 评分偏离 0.5 的程度对其判断是否正确的 AUC 只有 \fthree{CN/
 \begin{table}[t]
 \centering\footnotesize
 \setlength{\tabcolsep}{3.4pt}
-\caption{\method{} 的消融（macro-F1，\%）。“整条替换”为全部测试样本的分析被替换，“半数单元替换”为每个单元以 0.5 的概率被替换。Weibo21 为 5 个种子，GossipCop 为 3 个种子。$^{*}$ 表示与完整模型的差异在配对 bootstrap 检验下显著（$p<0.05$）。}\label{tab:ablation}
+\caption{\method{} 的消融（macro-F1，\%）。“整条替换”与“单元替换”分别为全部测试样本的分析被整条替换、全部声明被逐条替换时的结果。Weibo21 为 5 个种子，GossipCop 为 3 个种子。$^{*}$ 表示在同一评测条件下与完整模型的差异在配对 bootstrap 检验下显著（$p<0.05$，未做多重比较校正）。}\label{tab:ablation}
 \fittable{tables/ablation.tex}
 \end{table}
 
@@ -149,26 +149,38 @@ LLM 评分偏离 0.5 的程度对其判断是否正确的 AUC 只有 \fthree{CN/
 
 \begin{table}[t]
 \centering\small
-\caption{选择性预测。AURC 越低越好；Acc@$c$ 为保留置信度最高的 $c\%$ 样本时的准确率（\%）。“选择器”为在验证集上拟合的逻辑回归。}\label{tab:selective}
+\caption{选择性预测（多种子均值）。AURC 越低越好；其余各列为只保留置信度最高的一部分样本时的准确率（\%），覆盖率 100\% 即不拒答。“选择器”为在验证集上拟合的逻辑回归。}\label{tab:selective}
 \fittable{tables/selective.tex}
 \end{table}
 
 \begin{figure}[t]
 \centering
 \includegraphics[width=\linewidth]{figures/selective.pdf}
-\caption{保留样本上的准确率随覆盖率的变化（多种子均值）。数值见表~\ref{tab:selective}。}\label{fig:selective}
+\caption{保留样本上的准确率随覆盖率的变化（多种子均值）。浅色线为 \method{} 直接用 $|\hat y-0.5|$ 作为置信度的结果。数值见表~\ref{tab:selective}。}\label{fig:selective}
 \end{figure}
+
+\paragraph{直接使用 LLM 评分会损害置信度排序}
+表~\ref{tab:selective} 中，以 $|\hat y-0.5|$ 为置信度时，Weibo21 上 \method{} 的 AURC（\ptwo{CN/selective/clara/maxprob/aurc}）比 BERT（\ptwo{CN/selective/bert/maxprob/aurc}）更差，BERT+ZS 与 FactGuard 也是如此。问题出在最有把握的那部分预测：只保留置信度最高的 10\% 样本时，BERT 的准确率为 \pone{CN/selective/bert/maxprob/acc@10}\%，\method{} 只有 \pone{CN/selective/clara/maxprob/acc@10}\%，BERT+ZS 为 \pone{CN/selective/bert_zs/maxprob/acc@10}\%。原因在于 LLM 的零样本评分高度两极化而且过于自信：Weibo21 测试集中有 \pone{CN/zs_calibration/hi_share}\% 的样本 $p_{\mathrm{zs}}>0.95$，其中实际为假的只有 \pone{CN/zs_calibration/hi_fake_rate}\%。把它的 logit 加到输出上，这批样本就被整体推到置信度的最高端：\method{} 置信度最高的 10\% 预测中有 \pone{CN/selective/clara/maxprob/top10_fake_share}\% 判假（BERT 为 \pone{CN/selective/bert/maxprob/top10_fake_share}\%），这一侧的准确率只有 \pone{CN/selective/clara/maxprob/top10_acc_fake_side}\%，判真的一侧则为 \pone{CN/selective/clara/maxprob/top10_acc_real_side}\%。\method{} 与 BERT+ZS 都没有对 LLM 的评分做校准，这是两者共同的缺陷。GossipCop 上 LLM 很少给出接近 1 的评分（$p_{\mathrm{zs}}>0.95$ 的样本占 \pone{EN/zs_calibration/hi_share}\%），这一现象不明显。
+
+\paragraph{选择器可以修复这一问题，但不构成优势}
+用裁决器的内部信号在验证集上拟合选择器后，\method{} 在 Weibo21 上的 AURC 降到 \ptwo{CN/selective/clara/selector/aurc}，置信度最高的 10\% 样本准确率回到 \pone{CN/selective/clara/selector/acc@10}\%，在 SLM 类方法中最低，但仍远不及 LoRA-LLM（\ptwo{CN/selective/lora/maxprob/aurc}）。在覆盖率不低于 50\% 的范围内，各 SLM 类方法的准确率相差不超过约 2 个点。GossipCop 上各方法的 AURC 都在 5--7 之间，BERT+ZS 最低（\ptwo{EN/selective/bert_zs/maxprob/aurc}）。总体上，\method{} 的内部信号可以用来纠正它自身的置信度排序，但没有带来超出其他方法的拒答能力；原设想中“两分支分歧与门控提供不可判信号”没有得到支持。
 
 \subsection{开销}\label{sec:exp-cost}
 
 \begin{table}[t]
 \centering\small
-\caption{每条新闻的 LLM 开销：平均输入与输出 token 数，以及单张 RTX 3090 上用 vLLM 批量生成时每千条新闻的耗时。}\label{tab:cost}
+\caption{每条新闻的 LLM 开销：平均输入与输出 token 数，以及单张 RTX 3090 上用 vLLM 批量生成时每千条新闻的耗时（秒）。$^\ddagger$ LoRA-LLM 的耗时用 Transformers 逐批前向测得，与 vLLM 不是同一推理实现，仅供量级参考。}\label{tab:cost}
 \fittable{tables/cost.tex}
 \end{table}
 
 \begin{table}[t]
 \centering\small
-\caption{可训练参数量与单次训练耗时（单张 RTX 3090；SLM 类方法不含冻结层的一次性缓存）。}\label{tab:train-cost}
+\caption{可训练参数量与单次训练耗时（单张 RTX 3090；SLM 类方法使用冻结层缓存与混合精度，不含一次性的缓存构建）。}\label{tab:train-cost}
 \fittable{tables/train_cost.tex}
 \end{table}
+
+\paragraph{\method{} 的 LLM 开销高于 ARG 与 FactGuard}
+表~\ref{tab:cost} 显示，\method{} 的结构化调用要为每条声明输出两条论证，是各方法中最贵的：其输出 token 数在 Weibo21 上是 ARG 两条理由之和的 \ftwo{CN/cost/clara_over_arg/completion} 倍，在新闻更长、声明更多的 GossipCop 上是 \ftwo{EN/cost/clara_over_arg/completion} 倍；生成耗时分别是 \ftwo{CN/cost/clara_over_arg/seconds_per_1000} 倍与 \ftwo{EN/cost/clara_over_arg/seconds_per_1000} 倍。把辩论压缩到一次结构化调用，相对于每条新闻需要多次调用的辩论方法节省了调用次数，但相对于只需两段短理由的 ARG 与 FactGuard 并不便宜。BERT+ZS 只需要一次输出单个 token 的调用，是使用 LLM 的方法中最便宜的，而它的精度并不低（表~\ref{tab:main}）。
+
+\paragraph{训练与推理}
+LoRA-LLM 推理时只做一次前向，开销与零样本判断同一量级，但需要对 7B 模型做一次约 \cnt{CN/lora_cost/train_seconds} 秒（Weibo21）的微调，并在部署时常驻一个 7B 模型。SLM 类方法在缓存冻结层之后单次训练不到 3 分钟（表~\ref{tab:train-cost}）；其中 ARG、FactGuard 与 \method{} 推理前都需要先完成表~\ref{tab:cost} 中的 LLM 生成。

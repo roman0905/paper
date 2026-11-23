@@ -317,12 +317,16 @@ def ablation_section(tag, runs, chosen, ds_tamper=None):
         row = {"test": ms(r["metrics"]["test"]["macf1"] for r in seeds.values()),
                "val": ms(r["metrics"]["val"]["macf1"] for r in seeds.values()),
                "auc": ms(r["metrics"]["test"]["auc"] for r in seeds.values())}
-        for key in ("noise100", "unit50"):
+        for key in ("noise100", "unit50", "unit100"):
             if all(key in r["metrics"] for r in seeds.values()):
                 row[key] = ms(r["metrics"][key]["macf1"] for r in seeds.values())
         if n != full_name:
             common = sorted(set(seeds) & set(full))
-            row["vs_full"] = A.compare(tag, {s: full[s] for s in common}, full_name, {s: seeds[s] for s in common}, n)
+            fa, fb = {s: full[s] for s in common}, {s: seeds[s] for s in common}
+            row["vs_full"] = A.compare(tag, fa, full_name, fb, n)
+            for key in ("noise100", "unit50", "unit100"):      # full model minus variant, same corruption
+                if all(key in r["metrics"] for r in list(fa.values()) + list(fb.values())):
+                    row["vs_full_" + key] = A.compare(tag, fa, full_name, fb, n, split=key)
         out["full" if n == full_name else n[len("clara-"):]] = row
     return out
 
@@ -422,6 +426,19 @@ def cost_section(D, llm):
                 secs[cur[0]][0] += float(m.group(3))
                 secs[cur[0]][1] += cur[2]
     out["gen_seconds_per_item"] = {t: v[0] / v[1] for t, v in secs.items() if v[1]}
+    # LLM outputs consumed by each method
+    groups = {"zs": ["zs"], "arg": ["td", "cs"], "factguard": ["tc", "cs"], "clara": ["clara", "zs"],
+              "clara_single": ["clara"]}
+    out["groups"] = {}
+    for g, tasks in groups.items():
+        row = {"calls": len(tasks), "prompt": sum(out["tokens"][t]["prompt"] for t in tasks),
+               "completion": sum(out["tokens"][t]["completion"] for t in tasks)}
+        if all(t in out["gen_seconds_per_item"] for t in tasks):
+            row["seconds_per_1000"] = 1000 * sum(out["gen_seconds_per_item"][t] for t in tasks)
+        out["groups"][g] = row
+    for ref in ("arg", "factguard"):
+        a, b = out["groups"]["clara"], out["groups"][ref]
+        out["clara_over_" + ref] = {k: a[k] / b[k] for k in ("prompt", "completion", "seconds_per_1000") if k in a and k in b}
     return out
 
 
@@ -498,6 +515,17 @@ def llm2_section(D, chosen, tag2, runs1):
     return out
 
 
+def zs_calibration(ds):
+    """How polarised and how accurate is the LLM's zero-shot P(fake) on the test split?"""
+    its = ds.split("test")
+    y = np.array([it["label"] for it in its])
+    pz = np.array([it["zs"]["p_fake"] for it in its], dtype=np.float64)
+    hi, lo = pz > 0.95, pz < 0.05
+    return {"hi_share": float(hi.mean()), "hi_fake_rate": float(y[hi].mean()),
+            "lo_share": float(lo.mean()), "lo_fake_rate": float(y[lo].mean()),
+            "mid_share": float((~hi & ~lo).mean())}
+
+
 def derived_section(res):
     """Differences quoted in the prose, computed here so that no number is derived by hand."""
     out = {}
@@ -522,6 +550,13 @@ def derived_section(res):
     for b in ("clara_d", "arg_d", "factguard_d"):
         put(b + "_minus_bert", lambda b=b: main[b]["macf1"] - bert())
     put("clarad_minus_clara", lambda: main["clara_d"]["macf1"] - main["clara"]["macf1"])
+    sig, nsig = res.get("significance", {}), res.get("noise_sig", {})
+    put("lora_minus_clara_same_seeds", lambda: -sig["lora"]["diff_mean"])
+    put("clara_minus_lora_same_seeds", lambda: sig["lora"]["diff_mean"])
+    put("argswap_minus_clara_item100", lambda: -nsig["noise100/arg_swap"]["diff_mean"])
+    put("arg_minus_clara_item100", lambda: -nsig["noise100/arg"]["diff_mean"])
+    sel = res.get("selective", {})
+    put("selector_aurc_gain", lambda: sel["clara"]["maxprob"]["aurc"] - sel["clara"]["selector"]["aurc"])
     if not out:
         raise Missing("nothing to derive")
     return out
@@ -584,6 +619,7 @@ def main():
                 skipped.append("{}/{}: {}".format(D, name, e))
 
         section("data", lambda: data_section(ds))
+        section("zs_calibration", lambda: zs_calibration(ds))
         section("cost", lambda: cost_section(D, args.llm))
         section("lora_cost", lambda: lora_cost(runs, chosen))
         section("llm_only", lambda: json.load(open(os.path.join(ROOT, "results", "llm_only", tag + ".json"), encoding="utf-8"))["rows"])

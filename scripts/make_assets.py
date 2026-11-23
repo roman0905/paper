@@ -24,6 +24,21 @@ NAME = {"bert": "BERT", "lora": "LoRA-LLM", "bert_zs": "BERT+ZS", "arg_gpt": "AR
 SKIPPED = []
 
 
+def both_sig(cmp, level=0.05):
+    """A difference is called significant only if the paired bootstrap over test items AND the
+    Welch test over seeds agree at ``level``."""
+    if not cmp or "bootstrap" not in cmp:
+        return False
+    w = cmp.get("welch_p", float("nan"))
+    return cmp["bootstrap"]["p"] < level and w == w and w < level
+
+
+def fmt_p(x):
+    if x != x:
+        return "--"
+    return "{:.3f}".format(x) if x >= 0.001 else "$<$0.001"
+
+
 def pct(x, d=2):
     return "{:.{d}f}".format(100 * x, d=d)
 
@@ -131,7 +146,7 @@ def tab_ablation(A):
     out = [r"\begin{tabular}{lcccccc}", r"\toprule",
            r"\multirow{2}{*}{变体} & \multicolumn{3}{c}{" + DS_LABEL["ARG-CN"] + r"} & \multicolumn{3}{c}{" + DS_LABEL["ARG-EN"] + r"} \\",
            r"\cmidrule(lr){2-4}\cmidrule(lr){5-7}",
-           r" & 原始 & 整条替换 & 半数单元替换 & 原始 & 整条替换 & 半数单元替换 \\", r"\midrule"]
+           r" & 原始 & 整条替换 & 单元替换 & 原始 & 整条替换 & 单元替换 \\", r"\midrule"]
     for row in ABL:
         if row is None:
             if out[-1] != r"\midrule":
@@ -144,12 +159,12 @@ def tab_ablation(A):
             if r is None:
                 cells += ["--"] * 3
                 continue
-            star = ""
-            if "vs_full" in r and r["vs_full"].get("bootstrap", {}).get("p", 1.0) < 0.05:
-                star = "$^{*}$"
-            cells.append(pm(r["test"]) + star)
-            cells.append(pm(r["noise100"]) if "noise100" in r else "--")
-            cells.append(pm(r["unit50"]) if "unit50" in r else "--")
+            cells.append(pm(r["test"]) + ("$^{*}$" if both_sig(r.get("vs_full")) else ""))
+            for key in ("noise100", "unit100"):
+                if key not in r:
+                    cells.append("--")
+                    continue
+                cells.append(pm(r[key]) + ("$^{*}$" if both_sig(r.get("vs_full_" + key)) else ""))
         if any(c != "--" for c in cells):
             out.append(label + " & " + " & ".join(cells) + r" \\")
     if out[-1] == r"\midrule":
@@ -424,25 +439,26 @@ def tab_selective(A):
             ("arg", "maxprob", "ARG"), ("arg", "selector", "ARG + 选择器"),
             ("factguard", "maxprob", "FactGuard"), ("factguard", "selector", "FactGuard + 选择器"),
             ("clara", "maxprob", r"\method{}"), ("clara", "selector", r"\method{} + 选择器")]
-    out = [r"\begin{tabular}{lcccccc}", r"\toprule",
-           r" & \multicolumn{3}{c}{" + DS_LABEL["ARG-CN"] + r"} & \multicolumn{3}{c}{" + DS_LABEL["ARG-EN"] + r"} \\",
-           r"\cmidrule(lr){2-4}\cmidrule(lr){5-7}",
-           r"方法 & AURC$\downarrow$ & Acc@90 & Acc@70 & AURC$\downarrow$ & Acc@90 & Acc@70 \\", r"\midrule"]
+    cols = [("aurc", r"AURC$\downarrow$"), ("acc@10", "10\\%"), ("acc@50", "50\\%"), ("acc@90", "90\\%"), ("acc@100", "100\\%")]
+    out = [r"\begin{tabular}{l" + "c" * (2 * len(cols)) + "}", r"\toprule",
+           r" & \multicolumn{%d}{c}{" % len(cols) + DS_LABEL["ARG-CN"] + r"} & \multicolumn{%d}{c}{" % len(cols) + DS_LABEL["ARG-EN"] + r"} \\",
+           r"\cmidrule(lr){2-%d}\cmidrule(lr){%d-%d}" % (len(cols) + 1, len(cols) + 2, 2 * len(cols) + 1),
+           r" & & \multicolumn{4}{c}{覆盖率为下列值时的准确率} & & \multicolumn{4}{c}{覆盖率为下列值时的准确率} \\",
+           r"\cmidrule(lr){3-6}\cmidrule(lr){8-11}",
+           "方法 & " + " & ".join(c[1] for c in cols) + " & " + " & ".join(c[1] for c in cols) + r" \\", r"\midrule"]
     for base, kind, label in rows:
         cells = []
         for D in DS:
             r = A[D]["selective"].get(base, {}).get(kind)
-            cells += [pct(r["aurc"]), pct(r["acc@90"]), pct(r["acc@70"])] if r else ["--"] * 3
+            cells += [pct(r[c[0]]) if r and c[0] in r else "--" for c in cols]
         if any(c != "--" for c in cells):
             out.append(label + " & " + " & ".join(cells) + r" \\")
     out += [r"\bottomrule", r"\end{tabular}"]
     return "\n".join(out) + "\n"
 
 
-COST = [("零样本判断", ["zs"]), ("ARG（TD + CS 理由）", ["td", "cs"]),
-        ("FactGuard（topic-content + CS 理由）", ["tc", "cs"]),
-        (r"\method{}（结构化调用 + 零样本评分）", ["clara", "zs"]),
-        (r"\method{}，严格单次调用", ["clara"])]
+COST = [("zs", "零样本判断"), ("arg", "ARG（TD + CS 理由）"), ("factguard", "FactGuard（topic-content + CS 理由）"),
+        ("clara", r"\method{}（结构化调用 + 零样本评分）"), ("clara_single", r"\method{}，严格单次调用")]
 
 
 def tab_cost(A):
@@ -450,13 +466,13 @@ def tab_cost(A):
            r" & & \multicolumn{3}{c}{" + DS_LABEL["ARG-CN"] + r"} & \multicolumn{3}{c}{" + DS_LABEL["ARG-EN"] + r"} \\",
            r"\cmidrule(lr){3-5}\cmidrule(lr){6-8}",
            r"LLM 输出 & 调用数 & 输入 & 输出 & 秒/千条 & 输入 & 输出 & 秒/千条 \\", r"\midrule"]
-    for label, tasks in COST:
+    for key, label in COST:
         cells = []
         for D in DS:
-            t, s = A[D]["cost"]["tokens"], A[D]["cost"]["gen_seconds_per_item"]
-            cells += ["{:.0f}".format(sum(t[k]["prompt"] for k in tasks)), "{:.0f}".format(sum(t[k]["completion"] for k in tasks)),
-                      "{:.0f}".format(1000 * sum(s[k] for k in tasks)) if all(k in s for k in tasks) else "--"]
-        out.append("{} & {} & ".format(label, len(tasks)) + " & ".join(cells) + r" \\")
+            g = A[D]["cost"]["groups"][key]
+            cells += ["{:.0f}".format(g["prompt"]), "{:.0f}".format(g["completion"]),
+                      "{:.0f}".format(g["seconds_per_1000"]) if "seconds_per_1000" in g else "--"]
+        out.append("{} & {} & ".format(label, A["ARG-CN"]["cost"]["groups"][key]["calls"]) + " & ".join(cells) + r" \\")
     if all("lora_cost" in A[D] for D in DS):
         cells = []
         for D in DS:
@@ -502,23 +518,30 @@ def tab_grid(A):
 
 
 def tab_sig(A):
-    order = ["bert", "bert_zs", "arg_gpt", "arg", "factguard", "lora"]
-    out = [r"\begin{tabular}{lcccccc}", r"\toprule",
-           r" & \multicolumn{3}{c}{" + DS_LABEL["ARG-CN"] + r"} & \multicolumn{3}{c}{" + DS_LABEL["ARG-EN"] + r"} \\",
-           r"\cmidrule(lr){2-4}\cmidrule(lr){5-7}",
-           r"\method{} 对比 & $\Delta$macF1 & 95\% CI & $p$ & $\Delta$macF1 & 95\% CI & $p$ \\", r"\midrule"]
-    for b in order:
-        cells = []
-        for D in DS:
-            r = A[D]["significance"].get(b)
-            if r is None or "bootstrap" not in r:
-                cells += ["--"] * 3
-            else:
-                bs = r["bootstrap"]
-                cells += ["{:+.2f}".format(100 * r["diff_mean"]), "[{:+.2f}, {:+.2f}]".format(100 * bs["ci_lo"], 100 * bs["ci_hi"]),
-                          "{:.3f}".format(bs["p"]) if bs["p"] >= 0.001 else "$<$0.001"]
-        if any(c != "--" for c in cells):
-            out.append(NAME[b] + " & " + " & ".join(cells) + r" \\")
+    def cells_for(cmp):
+        if cmp is None or "bootstrap" not in cmp:
+            return ["--"] * 4
+        bs = cmp["bootstrap"]
+        return ["{:+.2f}".format(100 * cmp["diff_mean"]), "[{:+.2f}, {:+.2f}]".format(100 * bs["ci_lo"], 100 * bs["ci_hi"]),
+                fmt_p(bs["p"]), fmt_p(cmp.get("welch_p", float("nan")))]
+
+    out = [r"\begin{tabular}{lcccccccc}", r"\toprule",
+           r" & \multicolumn{4}{c}{" + DS_LABEL["ARG-CN"] + r"} & \multicolumn{4}{c}{" + DS_LABEL["ARG-EN"] + r"} \\",
+           r"\cmidrule(lr){2-5}\cmidrule(lr){6-9}",
+           r"\method{} 对比 & $\Delta$ & 95\% CI & $p_{\text{样本}}$ & $p_{\text{种子}}$ & $\Delta$ & 95\% CI & $p_{\text{样本}}$ & $p_{\text{种子}}$ \\"]
+    blocks = [("原始测试集", "significance", ["bert", "bert_zs", "arg_gpt", "arg", "arg_swap", "factguard", "lora"], "{}"),
+              ("全部分析被整条替换", "noise_sig", ["arg", "arg_swap"], "noise100/{}"),
+              ("全部声明/理由句被逐个替换", "noise_sig", ["arg", "arg_swap"], "unit100/{}")]
+    for title, sec, bases, key in blocks:
+        body = []
+        for b in bases:
+            cells = []
+            for D in DS:
+                cells += cells_for(A[D].get(sec, {}).get(key.format(b)))
+            if any(c != "--" for c in cells):
+                body.append(NAME[b] + " & " + " & ".join(cells) + r" \\")
+        if body:
+            out += [r"\midrule", r"\multicolumn{9}{l}{\emph{" + title + r"}} \\"] + body
     out += [r"\bottomrule", r"\end{tabular}"]
     return "\n".join(out) + "\n"
 
@@ -714,8 +737,8 @@ def fig_selective(A, path):
             x, y = 100 * np.array(c["coverage"]), 100 * np.array(c["accuracy"])
             handles[label] = ax.plot(x, y, label=label, zorder=3, **style[label])[0]
             ends.append((y[0], label))
-        ax.set_xlim(100, 50)
-        _end_labels(ax, 50, ends, 46.5)
+        ax.set_xlim(100, 10)
+        _end_labels(ax, 10, ends, 4.5)
         ax.set_xlabel("覆盖率（%）；越往右拒答越多", fontsize=8)
         ax.set_title(DS_LABEL[D], loc="left")
     axes[0].set_ylabel("保留样本上的准确率（%）")
