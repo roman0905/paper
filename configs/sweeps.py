@@ -86,6 +86,13 @@ def distill(lang: str, lr: float) -> List[Dict[str, Any]]:
     ]
 
 
+def inputs(lang: str, lr: float) -> List[Dict[str, Any]]:
+    """Text-only classifiers reading a style-normalised rendering of the news instead of the news:
+    the claims extracted by the LLM, or FactGuard's topic-content summary."""
+    return [{"name": "bert_" + k, "group": "trim", "method": "bert", "model": {"text_source": k},
+             "train": {"lr": lr}} for k in ("claims", "tc")]
+
+
 CLARA_ABLATIONS: Dict[str, Dict[str, Any]] = {
     # unit of analysis
     "no_claims": {"use_claims": False},

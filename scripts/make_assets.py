@@ -18,7 +18,9 @@ DS_LABEL = {"ARG-CN": "Weibo21（中文）", "ARG-EN": "GossipCop（英文）"}
 SHORT = {"ARG-CN": "CN", "ARG-EN": "EN"}
 NAME = {"bert": "BERT", "lora": "LoRA-LLM", "bert_zs": "BERT+ZS", "arg_gpt": "ARG（GPT-3.5 理由）",
         "arg": "ARG", "factguard": "FactGuard", "clara": r"\method{}", "arg_d": "ARG-D",
-        "factguard_d": "FactGuard-D", "clara_d": r"\student{}"}
+        "factguard_d": "FactGuard-D", "clara_d": r"\student{}", "arg_swap": "ARG + 错配负例",
+        "bert_claims": "BERT（只读 LLM 抽取的声明）", "bert_tc": "BERT（只读 topic-content）",
+        "clara-no_relevance": r"\method{} 去掉相关性门控"}
 SKIPPED = []
 
 
@@ -115,18 +117,21 @@ def tab_main(A):
 
 ABL = [("full", r"\method{}（完整）"), None,
        ("no_claims", "去掉声明，仅整体实例"), ("no_overall", "去掉整体实例，仅声明"), None,
-       ("refute_only", "仅质疑论证"), ("no_args", "去掉论证文本，仅评分"), ("no_v", "去掉评分，仅论证文本"),
-       ("fi_score", "整体评分取提示内第一印象（严格单次调用）"), None,
-       ("no_gate", "去掉门控（$g\\equiv1$）"), ("item_gate", "新闻级门控（一条新闻共用一个 $g$）"),
-       ("no_gate_fake", "门控监督不含假新闻声明"), None,
+       ("no_args", "去掉论证文本，仅评分"), ("no_v", "去掉评分，仅论证文本"),
+       ("fi_score", "论证前评分取提示内第一印象（严格单次调用）"), None,
+       ("no_relevance", "去掉相关性门控与错配负例"),
+       ("no_gate", "去掉判定门控（$g\\equiv1$）"), ("item_gate", "新闻级判定门控（一条新闻共用一个 $g$）"), None,
        ("agg_attention", "注意力聚合替代 noisy-OR"), ("no_global", "去掉整体文本分支"),
-       ("entangled", "实例打分可见整条新闻（耦合式）")]
+       ("entangled", "实例证据可见整条新闻（耦合式）")]
 
 
 def tab_ablation(A):
-    out = [r"\begin{tabular}{lcccc}", r"\toprule",
-           r"\multirow{2}{*}{变体} & \multicolumn{2}{c}{" + DS_LABEL["ARG-CN"] + r"} & \multicolumn{2}{c}{" + DS_LABEL["ARG-EN"] + r"} \\",
-           r"\cmidrule(lr){2-3}\cmidrule(lr){4-5}", r" & macF1 & 噪声 100\% & macF1 & 噪声 100\% \\", r"\midrule"]
+    if not any("ablation" in A[D] for D in DS):
+        raise KeyError("ablation")
+    out = [r"\begin{tabular}{lcccccc}", r"\toprule",
+           r"\multirow{2}{*}{变体} & \multicolumn{3}{c}{" + DS_LABEL["ARG-CN"] + r"} & \multicolumn{3}{c}{" + DS_LABEL["ARG-EN"] + r"} \\",
+           r"\cmidrule(lr){2-4}\cmidrule(lr){5-7}",
+           r" & 原始 & 整条替换 & 半数单元替换 & 原始 & 整条替换 & 半数单元替换 \\", r"\midrule"]
     for row in ABL:
         if row is None:
             if out[-1] != r"\midrule":
@@ -137,57 +142,136 @@ def tab_ablation(A):
         for D in DS:
             r = A[D].get("ablation", {}).get(key)
             if r is None:
-                cells += ["--", "--"]
+                cells += ["--"] * 3
                 continue
             star = ""
             if "vs_full" in r and r["vs_full"].get("bootstrap", {}).get("p", 1.0) < 0.05:
                 star = "$^{*}$"
             cells.append(pm(r["test"]) + star)
             cells.append(pm(r["noise100"]) if "noise100" in r else "--")
+            cells.append(pm(r["unit50"]) if "unit50" in r else "--")
         if any(c != "--" for c in cells):
             out.append(label + " & " + " & ".join(cells) + r" \\")
     if out[-1] == r"\midrule":
         out.pop()
     out += [r"\bottomrule", r"\end{tabular}"]
-    if not any("ablation" in A[D] for D in DS):
-        raise KeyError("ablation")
     return "\n".join(out) + "\n"
 
 
 def tab_gate(A):
-    def g(D, k):
-        return A[D]["gate"]["clara"][k]["mean"]
-
+    """Relevance gate: separation of genuine from foreign analysis units."""
+    f3 = lambda x: "{:.3f}".format(x)
     out = [r"\begin{tabular}{lcccc}", r"\toprule",
            r" & \multicolumn{2}{c}{" + DS_LABEL["ARG-CN"] + r"} & \multicolumn{2}{c}{" + DS_LABEL["ARG-EN"] + r"} \\",
-           r"\cmidrule(lr){2-3}\cmidrule(lr){4-5}", r" & 整体实例 & 真新闻声明 & 整体实例 & 真新闻声明 \\", r"\midrule"]
-    spec = [("LLM 表态比例（\\%）", "decided_rate", pct), ("表态时 LLM 站对边的比例（\\%）", "llm_acc", pct),
-            ("AUC：门控 $g$ $\\rightarrow$ LLM 是否站对边", "auc_gate", lambda x: "{:.3f}".format(x)),
-            ("AUC：LLM 自身置信度 $\\rightarrow$ 同上", "auc_llm_conf", lambda x: "{:.3f}".format(x)),
-            ("LLM 站对边时的平均 $g$", "gate_when_right", lambda x: "{:.3f}".format(x)),
-            ("LLM 站错边时的平均 $g$", "gate_when_wrong", lambda x: "{:.3f}".format(x))]
-    for label, key, fmt in spec:
-        out.append(label + " & " + " & ".join(fmt(g(D, "{}/{}".format(part, key))) for D in DS for part in ("overall", "real_claims")) + r" \\")
+           r"\cmidrule(lr){2-3}\cmidrule(lr){4-5}", r" & 整条替换 & 单元替换 & 整条替换 & 单元替换 \\", r"\midrule"]
+    R = {D: A[D]["gate"]["relevance"] for D in DS}
+    spec = [("AUC：相关性门控 $r$ $\\rightarrow$ 是否为本新闻的分析", "auc_r"),
+            ("AUC：判定门控 $g$ $\\rightarrow$ 同上", "auc_g"),
+            ("本新闻的分析单元上的平均 $r$", "r_genuine"), ("被替换的分析单元上的平均 $r$", "r_foreign")]
+    for label, key in spec:
+        out.append(label + " & " + " & ".join(f3(R[D]["{}/{}".format(lvl, key)]) for D in DS for lvl in ("item", "unit")) + r" \\")
     out += [r"\bottomrule", r"\end{tabular}"]
     return "\n".join(out) + "\n"
 
 
-def tab_gate_noise(A):
-    out = [r"\begin{tabular}{lcccccc}", r"\toprule",
-           r" & \multicolumn{3}{c}{" + DS_LABEL["ARG-CN"] + r"} & \multicolumn{3}{c}{" + DS_LABEL["ARG-EN"] + r"} \\",
-           r"\cmidrule(lr){2-4}\cmidrule(lr){5-7}", r"方法 & 未替换 & 被替换 & AUC & 未替换 & 被替换 & AUC \\", r"\midrule"]
-    for base in ("arg", "factguard", "clara"):
+def tab_gate_cells(A):
+    """What does the verdict gate follow: the correctness of the LLM or the label of the news?"""
+    f3 = lambda x: "{:.3f}".format(x)
+
+    def g(D, k):
+        return A[D]["gate"]["clara"][k]["mean"]
+
+    out = [r"\begin{tabular}{llcccc}", r"\toprule",
+           r" & & \multicolumn{2}{c}{" + DS_LABEL["ARG-CN"] + r"} & \multicolumn{2}{c}{" + DS_LABEL["ARG-EN"] + r"} \\",
+           r"\cmidrule(lr){3-4}\cmidrule(lr){5-6}",
+           r"LLM 的整体判断 & 新闻标签 & 占比（\%） & 平均 $g_0$ & 占比（\%） & 平均 $g_0$ \\", r"\midrule"]
+    cells = [("sayF_y1", "判假", "假（LLM 对）"), ("sayF_y0", "判假", "真（LLM 错）"),
+             ("sayR_y1", "判真", "假（LLM 错）"), ("sayR_y0", "判真", "真（LLM 对）")]
+    tot = {D: sum(g(D, "cells/n_" + c[0]) for c in cells) for D in DS}
+    for key, say, lab in cells:
+        out.append("{} & {} & ".format(say, lab) + " & ".join(
+            "{:.1f} & {}".format(100 * g(D, "cells/n_" + key) / tot[D], f3(g(D, "cells/" + key))) for D in DS) + r" \\")
+    out.append(r"\midrule")
+    for label, key in [("AUC：$g_0$ $\\rightarrow$ LLM 的整体判断是否正确", "overall/auc_gate"),
+                       ("AUC：$g_0$ $\\rightarrow$ 新闻是否为假", "overall/auc_gate_for_label"),
+                       ("AUC：LLM 自身置信度 $\\rightarrow$ 判断是否正确", "overall/auc_llm_conf"),
+                       ("AUC：文本分支与 LLM 是否一致 $\\rightarrow$ 判断是否正确", "overall/auc_text_agreement")]:
+        out.append(r"\multicolumn{2}{l}{" + label + "} & " + " & ".join(
+            r"\multicolumn{2}{c}{" + (f3(g(D, key)) if key in A[D]["gate"]["clara"] else "--") + "}" for D in DS) + r" \\")
+    out += [r"\bottomrule", r"\end{tabular}"]
+    return "\n".join(out) + "\n"
+
+
+def tab_noise(A):
+    """macro-F1 under replacement of the LLM analysis, as a table (the figure shows the curves)."""
+    rows = [("bert", "BERT（不使用 LLM）"), ("bert_zs", "BERT+ZS"), ("factguard", "FactGuard"), ("arg", "ARG"),
+            ("arg_swap", "ARG + 错配负例"), ("clara-no_relevance", r"\method{} 去掉相关性门控"), ("clara", r"\method{}")]
+    cols = [("item", "0", "原始"), ("item", "40", "40\\%"), ("item", "100", "100\\%"), ("unit", "50", "50\\%"), ("unit", "100", "100\\%")]
+    out = [r"\begin{tabular}{l" + "ccccc" * 2 + "}", r"\toprule",
+           r" & \multicolumn{5}{c}{" + DS_LABEL["ARG-CN"] + r"} & \multicolumn{5}{c}{" + DS_LABEL["ARG-EN"] + r"} \\",
+           r"\cmidrule(lr){2-6}\cmidrule(lr){7-11}",
+           r" & & \multicolumn{2}{c}{整条替换} & \multicolumn{2}{c}{单元替换} & & \multicolumn{2}{c}{整条替换} & \multicolumn{2}{c}{单元替换} \\",
+           r"\cmidrule(lr){3-4}\cmidrule(lr){5-6}\cmidrule(lr){8-9}\cmidrule(lr){10-11}",
+           "方法 & " + " & ".join(c[2] for c in cols) + " & " + " & ".join(c[2] for c in cols) + r" \\", r"\midrule"]
+    for key, label in rows:
         cells = []
         for D in DS:
-            r = A[D]["gate"]["noise"].get(base)
-            cells += ["{:.3f}".format(r[k]) for k in ("clean", "corrupted", "auc")] if r else ["--"] * 3
-        out.append(NAME[base] + " & " + " & ".join(cells) + r" \\")
+            N = A[D]["noise"].get(key)
+            for lvl, rate, _ in cols:
+                if N is None:
+                    cells.append("--")
+                elif key == "bert":
+                    cells.append(pct(N["item"]["0"]["mean"]))
+                else:
+                    v = N[lvl].get(rate)
+                    cells.append(pct(v["mean"]) if v else "--")
+        if any(c != "--" for c in cells):
+            out.append(label + " & " + " & ".join(cells) + r" \\")
+    out += [r"\bottomrule", r"\end{tabular}"]
+    return "\n".join(out) + "\n"
+
+
+def tab_useful(A):
+    """ARG's rationale usefulness predictor against the correctness of the LLM judgment."""
+    f3 = lambda x: "{:.3f}".format(x)
+    out = [r"\begin{tabular}{llcccc}", r"\toprule",
+           r" & & \multicolumn{2}{c}{" + DS_LABEL["ARG-CN"] + r"} & \multicolumn{2}{c}{" + DS_LABEL["ARG-EN"] + r"} \\",
+           r"\cmidrule(lr){3-4}\cmidrule(lr){5-6}", r"模型 & 理由 & 可用性预测 & 融合权重 & 可用性预测 & 融合权重 \\", r"\midrule"]
+    for base in ("arg_gpt", "arg", "arg_swap"):
+        for k, kn in (("td", "文字描述"), ("cs", "常识")):
+            cells = []
+            for D in DS:
+                U = A[D]["gate"]["usefulness"].get(base)
+                cells += [f3(U[k + "/auc_useful"]) if U and k + "/auc_useful" in U else "--",
+                          f3(U[k + "/auc_weight"]) if U and k + "/auc_weight" in U else "--"]
+            if any(c != "--" for c in cells):
+                out.append("{} & {} & ".format(NAME[base] if k == "td" else "", kn) + " & ".join(cells) + r" \\")
+    out += [r"\bottomrule", r"\end{tabular}"]
+    return "\n".join(out) + "\n"
+
+
+def tab_style_llm(A):
+    f1 = lambda x: "{:.1f}".format(100 * x)
+    f2 = lambda x: "{:.2f}".format(x)
+    rows = [("zero-shot P(fake)", "零样本判断 $p_{\\mathrm{zs}}$"), ("overall verdict", "整体判断的怀疑度 $v_0$"),
+            ("max claim suspicion", "声明怀疑度的最大值"), ("mean claim suspicion", "声明怀疑度的均值")]
+    out = [r"\begin{tabular}{lcccccccc}", r"\toprule",
+           r" & \multicolumn{4}{c}{" + DS_LABEL["ARG-CN"] + r"} & \multicolumn{4}{c}{" + DS_LABEL["ARG-EN"] + r"} \\",
+           r"\cmidrule(lr){2-5}\cmidrule(lr){6-9}",
+           r" & \multicolumn{2}{c}{AUC（\%）} & \multicolumn{2}{c}{均值差（假$-$真）} & \multicolumn{2}{c}{AUC（\%）} & \multicolumn{2}{c}{均值差（假$-$真）} \\",
+           r"LLM 评分 & 原文 & 改写 & 原文 & 改写 & 原文 & 改写 & 原文 & 改写 \\", r"\midrule"]
+    for key, label in rows:
+        cells = []
+        for D in DS:
+            r = A[D]["style_llm"][key]
+            cells += [f1(r["auc_orig"]), f1(r["auc_style"]), f2(r["fake_orig"] - r["real_orig"]), f2(r["fake_style"] - r["real_style"])]
+        out.append(label + " & " + " & ".join(cells) + r" \\")
     out += [r"\bottomrule", r"\end{tabular}"]
     return "\n".join(out) + "\n"
 
 
 def tab_style(A):
-    order = ["bert", "lora", "bert_zs", "arg", "factguard", "clara", "clara_d"]
+    order = ["bert", "lora", "bert_zs", "arg", "factguard", "clara", "clara_d", "bert_tc", "bert_claims"]
     out = [r"\begin{tabular}{lcccccc}", r"\toprule",
            r" & \multicolumn{3}{c}{" + DS_LABEL["ARG-CN"] + r"} & \multicolumn{3}{c}{" + DS_LABEL["ARG-EN"] + r"} \\",
            r"\cmidrule(lr){2-4}\cmidrule(lr){5-7}", r"方法 & 原文 & 改写后 & $\Delta$ & 原文 & 改写后 & $\Delta$ \\", r"\midrule"]
@@ -281,7 +365,7 @@ def tab_tamper(A):
 
 def tab_lodo(A):
     L = A["ARG-CN"]["lodo"]
-    bases = ["bert", "arg", "factguard", "clara"]
+    bases = ["bert", "bert_zs", "arg", "clara"]
     doms = [d for d in L if not d.startswith("_")]
     out = [r"\begin{tabular}{lrrcccc}", r"\toprule",
            "留出领域 & 训练数 & 测试数 & " + " & ".join(NAME[b] for b in bases) + r" \\", r"\midrule"]
@@ -497,48 +581,65 @@ def tab_cases(A):
 
 
 # ------------------------------------------------------------------------------------------ figures
-ENT = {"clara": 0, "arg": 1, "factguard": 2, "bert_zs": 3, "lora": 4, "clara_d": 5, "bert": None}
+# categorical slot of every entity: fixed, never reassigned between figures
+# (validated with the palette checker for the sets that share a plot: 0-1-2-3-4 and 0-1-6)
+ENT = {"clara": 0, "arg": 1, "factguard": 2, "bert_zs": 3, "arg_swap": 4, "clara_d": 5, "lora": 6, "bert": None}
 FIG_NAME = {"clara": "CLARA", "arg": "ARG", "factguard": "FactGuard", "bert_zs": "BERT+ZS", "lora": "LoRA-LLM",
-            "clara_d": "CLARA-D", "bert": "BERT"}
+            "clara_d": "CLARA-D", "bert": "BERT", "arg_swap": "ARG+错配负例"}
+
+
+def _end_labels(ax, x_end, ends, x_text, ha="left"):
+    """Direct labels at the line ends, spread vertically with thin leaders when they would collide."""
+    from clara import plotting as P
+
+    if not ends:
+        return
+    lo, hi = ax.get_ylim()
+    pos = P.spread_labels([e[0] for e in ends], 0.085 * (hi - lo))
+    for (y, name), py in zip(ends, pos):
+        ax.annotate(name, (x_end, y), xytext=(x_text, py), textcoords="data", va="center", ha=ha,
+                    fontsize=7.5, color=P.INK2, annotation_clip=False,
+                    arrowprops=dict(arrowstyle="-", color=P.AXIS, linewidth=0.6, shrinkA=0, shrinkB=2))
 
 
 def fig_noise(A, path):
+    """Rows: item-level / unit-level replacement.  Columns: datasets."""
     import matplotlib.pyplot as plt
 
     from clara import plotting as P
 
     P.setup()
-    fig, axes = plt.subplots(1, 2, figsize=(6.3, 2.55), sharey=False)
-    for ax, D in zip(axes, DS):
-        N = A[D]["noise"]
-        ends = []
-        for base in ("clara", "arg", "factguard", "bert_zs"):
-            if base not in N:
-                continue
-            xs = sorted(int(k) for k in N[base])
-            ys = [100 * N[base][str(x)]["mean"] for x in xs]
-            es = [100 * N[base][str(x)]["std"] for x in xs]
-            P.line(ax, xs, ys, ENT[base], FIG_NAME[base], yerr=es)
-            ends.append((ys[-1], FIG_NAME[base]))
-        if "bert" in N:
-            y = 100 * N["bert"]["0"]["mean"]
-            ax.axhline(y, color=P.NEUTRAL, linewidth=1.2, zorder=2)
-            ends.append((y, "BERT"))
-        lo, hi = ax.get_ylim()
-        pos = P.spread_labels([e[0] for e in ends], 0.075 * (hi - lo))
-        for (y, name), py in zip(ends, pos):
-            ax.annotate(name, (100, y), xytext=(104, py), textcoords="data", va="center", ha="left",
-                        fontsize=8, color=P.INK2, annotation_clip=False,
-                        arrowprops=dict(arrowstyle="-", color=P.AXIS, linewidth=0.6, shrinkA=0, shrinkB=2))
-        ax.set_xlim(-4, 104)
-        ax.set_xticks([0, 20, 40, 60, 80, 100])
-        ax.set_xlabel("LLM 输出被替换的测试样本比例（%）")
-        ax.set_title(DS_LABEL[D], loc="left")
-    axes[0].set_ylabel("macro-F1（%）")
-    h, l = axes[0].get_legend_handles_labels()
-    fig.legend(h, l, loc="upper center", ncol=len(l), bbox_to_anchor=(0.5, 1.06), handlelength=1.8,
-               labelcolor=P.INK2, frameon=False, columnspacing=1.6)
-    fig.subplots_adjust(wspace=0.42, right=0.9)
+    fig, axes = plt.subplots(2, 2, figsize=(6.5, 4.7))
+    levels = [("item", "整条替换：被替换的测试样本比例（%）", ("clara", "arg", "arg_swap", "factguard", "bert_zs")),
+              ("unit", "单元替换：每个声明/理由句被替换的概率（%）", ("clara", "arg", "arg_swap", "factguard"))]
+    handles = {}
+    for row, (lvl, xlabel, bases) in enumerate(levels):
+        for col, D in enumerate(DS):
+            ax, N = axes[row][col], A[D]["noise"]
+            ends, xmax = [], 100
+            for base in bases:
+                if base not in N or len(N[base][lvl]) < 2:
+                    continue
+                xs = sorted(int(k) for k in N[base][lvl])
+                ys = [100 * N[base][lvl][str(x)]["mean"] for x in xs]
+                es = [100 * N[base][lvl][str(x)]["std"] for x in xs]
+                handles[FIG_NAME[base]] = P.line(ax, xs, ys, ENT[base], FIG_NAME[base], yerr=es)
+                ends.append((ys[-1], FIG_NAME[base]))
+            if "bert" in N:
+                y = 100 * N["bert"]["item"]["0"]["mean"]
+                handles["BERT（不使用 LLM）"] = ax.axhline(y, color=P.NEUTRAL, linewidth=1.2, zorder=2)
+                ends.append((y, "BERT"))
+            ax.set_xlim(-4, xmax + 4)
+            ax.set_xticks([0, 20, 40, 60, 80, 100] if lvl == "item" else [0, 25, 50, 100])
+            _end_labels(ax, xmax, ends, xmax + 9)
+            ax.set_xlabel(xlabel, fontsize=8)
+            if row == 0:
+                ax.set_title(DS_LABEL[D], loc="left")
+            if col == 0:
+                ax.set_ylabel("macro-F1（%）")
+    fig.legend(list(handles.values()), list(handles.keys()), loc="upper center", ncol=len(handles),
+               bbox_to_anchor=(0.5, 1.03), handlelength=1.8, labelcolor=P.INK2, frameon=False, columnspacing=1.3)
+    fig.subplots_adjust(wspace=0.55, hspace=0.5, right=0.88, top=0.9)
     P.save(fig, path)
 
 
@@ -548,9 +649,13 @@ def fig_selective(A, path):
     from clara import plotting as P
 
     P.setup()
-    fig, axes = plt.subplots(1, 2, figsize=(6.3, 2.55))
-    series = [("clara", "selector", "CLARA + 选择器"), ("arg", "maxprob", "ARG"), ("factguard", "maxprob", "FactGuard"),
+    fig, axes = plt.subplots(1, 2, figsize=(6.5, 2.6))
+    series = [("clara", "selector", "CLARA+选择器"), ("clara", "maxprob", "CLARA"), ("arg", "maxprob", "ARG"),
               ("lora", "maxprob", "LoRA-LLM"), ("bert", "maxprob", "BERT")]
+    style = {"CLARA+选择器": dict(color=P.SLOTS[0], linewidth=2.0), "CLARA": dict(color=P.SLOTS[0], linewidth=1.2, alpha=0.55),
+             "ARG": dict(color=P.SLOTS[1], linewidth=2.0), "LoRA-LLM": dict(color=P.SLOTS[ENT["lora"]], linewidth=2.0),
+             "BERT": dict(color=P.NEUTRAL, linewidth=1.4)}
+    handles = {}
     for ax, D in zip(axes, DS):
         C = A[D]["selective"]["_curves"]
         ends = []
@@ -559,24 +664,16 @@ def fig_selective(A, path):
             if c is None:
                 continue
             x, y = 100 * np.array(c["coverage"]), 100 * np.array(c["accuracy"])
-            color = P.NEUTRAL if ENT[base] is None else P.SLOTS[ENT[base]]
-            ax.plot(x, y, color=color, linewidth=1.4 if ENT[base] is None else 2.0, label=label, zorder=3)
+            handles[label] = ax.plot(x, y, label=label, zorder=3, **style[label])[0]
             ends.append((y[0], label))
-        lo, hi = ax.get_ylim()
-        pos = P.spread_labels([e[0] for e in ends], 0.075 * (hi - lo))
-        for (y, name), py in zip(ends, pos):
-            ax.annotate(name, (50, y), xytext=(47.5, py), textcoords="data", va="center", ha="right",
-                        fontsize=8, color=P.INK2, annotation_clip=False,
-                        arrowprops=dict(arrowstyle="-", color=P.AXIS, linewidth=0.6, shrinkA=0, shrinkB=2))
-        ax.set_xlim(50, 100)
-        ax.invert_xaxis()
-        ax.set_xlabel("覆盖率（%），向右拒答更多")
+        ax.set_xlim(100, 50)
+        _end_labels(ax, 50, ends, 46.5)
+        ax.set_xlabel("覆盖率（%）；越往右拒答越多", fontsize=8)
         ax.set_title(DS_LABEL[D], loc="left")
     axes[0].set_ylabel("保留样本上的准确率（%）")
-    h, l = axes[0].get_legend_handles_labels()
-    fig.legend(h, l, loc="upper center", ncol=len(l), bbox_to_anchor=(0.5, 1.06), handlelength=1.8,
-               labelcolor=P.INK2, frameon=False, columnspacing=1.4)
-    fig.subplots_adjust(wspace=0.5, left=0.19)
+    fig.legend(list(handles.values()), list(handles.keys()), loc="upper center", ncol=len(handles),
+               bbox_to_anchor=(0.5, 1.07), handlelength=1.8, labelcolor=P.INK2, frameon=False, columnspacing=1.3)
+    fig.subplots_adjust(wspace=0.62, right=0.86)
     P.save(fig, path)
 
 
@@ -586,17 +683,19 @@ def fig_sensitivity(A, path):
     from clara import plotting as P
 
     P.setup()
-    panels = []
-    for D in DS:
-        if "claims_k" in A[D]:
-            panels.append((D, "claims_k", "声明数上限 $K$"))
-    for key, label in (("lambda_mil", r"$\lambda_{\mathrm{mil}}$"), ("lambda_gate", r"$\lambda_{\mathrm{gate}}$")):
+    panels = [(D, "claims_k", "声明数上限 $K$（" + SHORT[D] + "）") for D in DS if "claims_k" in A[D]]
+    for key, label in (("swap_rate", r"错配负例比例 $\rho$"), ("lambda_rel", r"$\lambda_{\mathrm{rel}}$"),
+                       ("lambda_mil", r"$\lambda_{\mathrm{mil}}$"), ("lambda_gate", r"$\lambda_{\mathrm{gate}}$")):
         if key in A["ARG-CN"]:
-            panels.append(("ARG-CN", key, label))
+            panels.append(("ARG-CN", key, label + "（CN）"))
     if not panels:
         raise KeyError("sensitivity")
-    fig, axes = plt.subplots(1, len(panels), figsize=(6.3, 2.2), squeeze=False)
-    for ax, (D, key, label) in zip(axes[0], panels):
+    ncol = 3
+    nrow = int(np.ceil(len(panels) / ncol))
+    fig, axes = plt.subplots(nrow, ncol, figsize=(6.5, 2.05 * nrow), squeeze=False)
+    for ax in axes.flat[len(panels):]:
+        ax.set_visible(False)
+    for ax, (D, key, label) in zip(axes.flat, panels):
         S = A[D][key]
         xs = sorted(S, key=float)
         ys = [100 * S[x]["test"]["mean"] for x in xs]
@@ -605,18 +704,18 @@ def fig_sensitivity(A, path):
         P.line(ax, pos, ys, 0, "CLARA", yerr=es)
         for i, x in enumerate(xs):
             if S[x].get("default"):
-                ax.annotate("默认", (i, ys[i]), xytext=(0, 9), textcoords="offset points", ha="center", fontsize=7.5, color=P.INK2)
+                ax.annotate("默认", (i, ys[i]), xytext=(0, 8), textcoords="offset points", ha="center", fontsize=7.5, color=P.INK2)
         if "main" in A[D] and "bert" in A[D]["main"]:
-            ax.axhline(100 * A[D]["main"]["bert"]["macf1"], color=P.NEUTRAL, linewidth=1.2, zorder=2)
-            ax.annotate("BERT", (len(xs) - 1, 100 * A[D]["main"]["bert"]["macf1"]), xytext=(0, -9),
-                        textcoords="offset points", ha="right", fontsize=7.5, color=P.INK2)
+            yb = 100 * A[D]["main"]["bert"]["macf1"]
+            ax.axhline(yb, color=P.NEUTRAL, linewidth=1.2, zorder=2)
+            ax.annotate("BERT", (pos[-1], yb), xytext=(4, -8), textcoords="offset points", ha="right", fontsize=7.5, color=P.INK2)
         ax.set_xticks(pos)
         ax.set_xticklabels(["{:g}".format(float(x)) for x in xs])
-        ax.set_xlabel(label)
-        ax.set_title(SHORT[D], loc="left")
-        ax.margins(x=0.12, y=0.25)
-    axes[0][0].set_ylabel("macro-F1（%）")
-    fig.subplots_adjust(wspace=0.45)
+        ax.set_xlabel(label, fontsize=8)
+        ax.margins(x=0.15, y=0.35)
+    for r in range(nrow):
+        axes[r][0].set_ylabel("macro-F1（%）")
+    fig.subplots_adjust(wspace=0.42, hspace=0.75)
     P.save(fig, path)
 
 
@@ -679,7 +778,8 @@ def main():
     with open(os.path.join(ROOT, "results", "analysis.json"), encoding="utf-8") as f:
         A = json.load(f)
     for name, fn in [("data", tab_data), ("main", tab_main), ("ablation", tab_ablation), ("gate", tab_gate),
-                     ("gate_noise", tab_gate_noise), ("style", tab_style), ("style_recall", tab_style_recall),
+                     ("gate_cells", tab_gate_cells), ("noise", tab_noise), ("useful", tab_useful),
+                     ("style_llm", tab_style_llm), ("style", tab_style), ("style_recall", tab_style_recall),
                      ("loc", tab_loc), ("loc_type", tab_loc_type), ("tamper", tab_tamper), ("lodo", tab_lodo),
                      ("selective", tab_selective), ("cost", tab_cost), ("train_cost", tab_train_cost),
                      ("grid", tab_grid), ("sig", tab_sig), ("live", tab_live), ("cases", tab_cases)]:

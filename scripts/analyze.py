@@ -24,8 +24,11 @@ from clara.report import load_preds, load_runs, select_by_val, stat, summarise  
 
 DATASETS = ["ARG-CN", "ARG-EN"]
 MAIN = ["bert", "lora", "bert_zs", "arg_gpt", "arg", "factguard", "clara", "arg_d", "factguard_d", "clara_d"]
+EXTRA = ["arg_swap", "bert_claims", "bert_tc"]          # controls and analysis-only classifiers
 DOMAINS = ["社会生活", "财经商业", "医药健康", "灾难事故", "文体娱乐", "政治"]
 NOISE = [20, 40, 60, 80, 100]
+UNIT = [25, 50, 100]
+SWEEP_RE = r"clara-(k\d+|swap[\d.]+|lrel[\d.]+|lmil[\d.]+|lgate[\d.]+)$"
 
 
 class Missing(Exception):
@@ -46,7 +49,7 @@ def ms(values):
 # ----------------------------------------------------------------------------------------------
 def main_table(tag, runs, chosen):
     out = {}
-    for base in MAIN:
+    for base in MAIN + EXTRA:
         if base not in chosen:
             continue
         name = chosen[base]
@@ -68,46 +71,76 @@ def grid_table(runs):
 
 def significance(tag, runs, chosen, ref="clara"):
     out = {}
-    for base in MAIN:
+    for base in MAIN + EXTRA:
         if base == ref or base not in chosen:
             continue
-        out[base] = A.compare(tag, need(runs, chosen[ref]), chosen[ref], runs[chosen[base]], chosen[base])
+        ra, rb = need(runs, chosen[ref]), runs[chosen[base]]
+        common = sorted(set(ra) & set(rb))          # e.g. 3 seeds for the fine-tuned LLM
+        out[base] = A.compare(tag, {s: ra[s] for s in common}, chosen[ref], {s: rb[s] for s in common}, chosen[base])
+        out[base]["n_seeds"] = len(common)
     return out
 
 
 def noise_curves(runs, chosen):
-    out = {}
-    for base in ["clara", "arg", "factguard", "bert_zs", "bert"]:
-        if base not in chosen:
-            continue
-        seeds = runs[chosen[base]]
-        curve = {"0": ms(r["metrics"]["test"]["macf1"] for r in seeds.values())}
-        for n in NOISE:
-            key = "noise{:02d}".format(n)
+    """macro-F1 under item-level (noiseXX) and unit-level (unitXX) replacement of the LLM analysis."""
+    def curve(seeds, prefix, rates):
+        c = {"0": ms(r["metrics"]["test"]["macf1"] for r in seeds.values())}
+        for n in rates:
+            key = "{}{:02d}".format(prefix, n)
             if all(key in r["metrics"] for r in seeds.values()):
-                curve[str(n)] = ms(r["metrics"][key]["macf1"] for r in seeds.values())
-        out[base] = curve
-    for name, seeds in runs.items():            # ablations evaluated under noise
-        if name.startswith("clara-") and all("noise100" in r["metrics"] for r in seeds.values()):
-            out[name] = {"0": ms(r["metrics"]["test"]["macf1"] for r in seeds.values()),
-                         "100": ms(r["metrics"]["noise100"]["macf1"] for r in seeds.values())}
+                c[str(n)] = ms(r["metrics"][key]["macf1"] for r in seeds.values())
+        return c
+
+    out = {}
+    names = {b: chosen[b] for b in ["clara", "arg", "arg_swap", "factguard", "bert_zs", "bert"] if b in chosen}
+    names.update({n: n for n in runs if n.startswith("clara-") and not re.match(SWEEP_RE, n)})
+    for label, name in names.items():
+        out[label] = {"item": curve(runs[name], "noise", NOISE), "unit": curve(runs[name], "unit", UNIT)}
     return out
 
 
 def gate_section(ds, tag, runs, chosen):
     name = chosen["clara"]
     out = {"clara": A.gate_analysis(ds, tag, name, need(runs, name)),
-           "noise": {"clara": A.gate_under_noise(tag, name, runs[name], "clara")}}
-    for base in ("arg", "factguard"):
+           "relevance": A.relevance_under_noise(ds, tag, name, runs[name], ds.lang),
+           "weights_under_noise": {}, "usefulness": {}}
+    for base in ("arg", "arg_swap", "factguard"):
         if base in chosen:
-            out["noise"][base] = A.gate_under_noise(tag, chosen[base], runs[chosen[base]], "pair")
-    if "arg" in chosen:
-        out["arg_gate_auc"] = A.arg_gate_auc(ds, tag, chosen["arg"], runs[chosen["arg"]], "llm")
-    if "arg_gpt" in chosen:
-        out["arg_gpt_gate_auc"] = A.arg_gate_auc(ds, tag, chosen["arg_gpt"], runs[chosen["arg_gpt"]], "gpt")
-    for abl in ("clara-item_gate", "clara-no_gate_fake"):
+            out["weights_under_noise"][base] = A.gate_under_noise(tag, chosen[base], runs[chosen[base]], "pair")
+    for base, source in (("arg", "llm"), ("arg_swap", "llm"), ("arg_gpt", "gpt")):
+        if base in chosen:
+            out["usefulness"][base] = A.arg_gate_auc(ds, tag, chosen[base], runs[chosen[base]], source)
+    for abl in ("clara-item_gate", "clara-no_relevance", "clara-entangled"):
         if abl in runs:
             out[abl] = A.gate_analysis(ds, tag, abl, runs[abl])
+    return out
+
+
+def style_llm_section(ds, ds_style):
+    """The LLM's own judgments before and after the style transfer (no trained model involved)."""
+    orig = {it["id"]: it for it in ds.split("test")}
+    st = [it for it in ds_style.split("test") if it.get("rewritten")]
+    y = np.array([it["label"] for it in st])
+    getters = {
+        "zero-shot P(fake)": lambda it: it["zs"]["p_fake"],
+        "overall verdict": lambda it: it["clara"]["overall"]["v"],
+        "max claim suspicion": lambda it: max(c["v"] for c in it["clara"]["claims"]),
+        "mean claim suspicion": lambda it: float(np.mean([c["v"] for c in it["clara"]["claims"]])),
+    }
+    out = {}
+    for name, get in getters.items():
+        a = np.array([get(orig[it["orig_id"]]) for it in st], dtype=np.float64)
+        b = np.array([get(it) for it in st], dtype=np.float64)
+        out[name] = {"auc_orig": detection_metrics(y, a)["auc"], "auc_style": detection_metrics(y, b)["auc"],
+                     "fake_orig": float(a[y == 1].mean()), "fake_style": float(b[y == 1].mean()),
+                     "real_orig": float(a[y == 0].mean()), "real_style": float(b[y == 0].mean())}
+    for k in ("td", "cs"):
+        a = np.array([orig[it["orig_id"]][k]["pred"] == 1 for it in st])
+        b = np.array([it[k]["pred"] == 1 for it in st])
+        out["hard judgment, " + k] = {"fake_orig": float(a[y == 1].mean()), "fake_style": float(b[y == 1].mean()),
+                                      "real_orig": float(a[y == 0].mean()), "real_style": float(b[y == 0].mean())}
+    out["_claims_orig"] = float(np.mean([len(orig[it["orig_id"]]["clara"]["claims"]) for it in st]))
+    out["_claims_style"] = float(np.mean([len(it["clara"]["claims"]) for it in st]))
     return out
 
 
@@ -118,7 +151,7 @@ def style_section(ds_style, tag, runs, chosen):
     orig = {it["id"]: it["orig_id"] for it in items}
     out = {"_n_items": len(items), "_n_rewritten": int(sum(rew.values())),
            "_n_fake_rewritten": int(sum(rew[it["id"]] and it["label"] == 1 for it in items))}
-    for base in MAIN:
+    for base in MAIN + EXTRA:
         if base not in chosen:
             continue
         name, per = chosen[base], []
@@ -185,18 +218,17 @@ def localisation_section(ds_tamper, tag, runs, chosen):
         if base in chosen:
             rows[label] = (chosen[base], runs[chosen[base]])
     for name in sorted(runs):
-        if name.startswith(("clara-", "clara_d-")):
+        if name.startswith(("clara-", "clara_d-")) and not re.match(SWEEP_RE, name):
             rows[name] = (name, runs[name])
     out = A.localisation(ds_tamper, tag, rows)
     if "CLARA" not in out:
         raise Missing("no tamper predictions for CLARA")
     out["_by_type"] = {}
     for t in sorted({it["change_type"] for it in ds_tamper.split("test")}):
-        sub = Dataset(ds_tamper.name, ds_tamper.lang,
-                      [it for it in ds_tamper.items if it["change_type"] == t], ds_tamper.llm)
-        if len(sub.items) >= 30:
-            r = A.localisation(sub, tag, {k: rows[k] for k in ("CLARA", "BERT + occlusion") if k in rows})
-            out["_by_type"][t] = {k: v for k, v in r.items()}
+        ids = {it["id"] for it in ds_tamper.split("test") if it["change_type"] == t}
+        if len(ids) >= 30:
+            out["_by_type"][t] = A.localisation(
+                ds_tamper, tag, {k: rows[k] for k in ("CLARA", "BERT + occlusion", "CLARA-D") if k in rows}, only=ids)
     sens = {}
     for base in MAIN:
         if base in chosen:
@@ -262,7 +294,7 @@ def selective_section(tag, runs, chosen):
 def ablation_section(tag, runs, chosen, ds_tamper=None):
     full_name = chosen["clara"]
     full = need(runs, full_name)
-    names = [full_name] + sorted(n for n in runs if n.startswith("clara-") and not re.match(r"clara-(k\d|lmil|lgate)", n))
+    names = [full_name] + sorted(n for n in runs if n.startswith("clara-") and not re.match(SWEEP_RE, n))
     if len(names) == 1:
         raise Missing("no ablation runs")
     out = {}
@@ -271,8 +303,9 @@ def ablation_section(tag, runs, chosen, ds_tamper=None):
         row = {"test": ms(r["metrics"]["test"]["macf1"] for r in seeds.values()),
                "val": ms(r["metrics"]["val"]["macf1"] for r in seeds.values()),
                "auc": ms(r["metrics"]["test"]["auc"] for r in seeds.values())}
-        if all("noise100" in r["metrics"] for r in seeds.values()):
-            row["noise100"] = ms(r["metrics"]["noise100"]["macf1"] for r in seeds.values())
+        for key in ("noise100", "unit50"):
+            if all(key in r["metrics"] for r in seeds.values()):
+                row[key] = ms(r["metrics"][key]["macf1"] for r in seeds.values())
         if n != full_name:
             common = sorted(set(seeds) & set(full))
             row["vs_full"] = A.compare(tag, {s: full[s] for s in common}, full_name, {s: seeds[s] for s in common}, n)
@@ -304,7 +337,7 @@ def lodo_section(D, llm, chosen):
         if not runs:
             continue
         row = {}
-        for base in ("bert", "arg", "factguard", "clara"):
+        for base in ("bert", "bert_zs", "arg", "clara"):
             name = chosen.get(base)
             if name in runs:
                 seeds = runs[name]
@@ -316,7 +349,7 @@ def lodo_section(D, llm, chosen):
             out[dom] = row
     if not out:
         raise Missing("no leave-one-domain-out runs")
-    bases = [b for b in ("bert", "arg", "factguard", "clara") if all(b in r for r in out.values())]
+    bases = [b for b in ("bert", "bert_zs", "arg", "clara") if all(b in r for r in out.values())]
     out["_macro_avg"] = {b: float(np.mean([out[d][b]["mean"] for d in out if not d.startswith("_")])) for b in bases}
     return out
 
@@ -440,7 +473,10 @@ def main():
         section("cases", lambda: case_section(load_extra("tamper"), tag, runs, chosen))
         section("selective", lambda: selective_section(tag, runs, chosen))
         section("ablation", lambda: ablation_section(tag, runs, chosen))
+        section("style_llm", lambda: style_llm_section(ds, load_extra("style")))
         section("claims_k", lambda: sweep_section(runs, chosen, r"clara-k(\d+)$", "max_claims"))
+        section("swap_rate", lambda: sweep_section(runs, chosen, r"clara-swap([\d.]+)$", "swap_rate"))
+        section("lambda_rel", lambda: sweep_section(runs, chosen, r"clara-lrel([\d.]+)$", "lambda_rel"))
         section("lambda_mil", lambda: sweep_section(runs, chosen, r"clara-lmil([\d.]+)$", "lambda_mil"))
         section("lambda_gate", lambda: sweep_section(runs, chosen, r"clara-lgate([\d.]+)$", "lambda_gate"))
         section("lodo", lambda: lodo_section(D, args.llm, chosen))

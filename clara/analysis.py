@@ -153,6 +153,17 @@ def gate_analysis(ds: Dataset, tag: str, name: str, runs: Runs, delta: float = 0
         add("overall/auc_llm_conf", _auc(right, np.abs(score[m] - 0.5)))
         add("overall/gate_when_right", T["g"][m][right].mean())
         add("overall/gate_when_wrong", T["g"][m][~right].mean())
+        # does the gate follow the correctness of the LLM, or the label of the news?
+        for sf, sname in ((True, "sayF"), (False, "sayR")):
+            for yy, yname in ((True, "y1"), (False, "y0")):
+                cell = m & (says_fake == sf) & (y == yy)
+                if cell.any():
+                    add("cells/{}_{}".format(sname, yname), T["g"][cell].mean())
+                    add("cells/n_{}_{}".format(sname, yname), cell.sum())
+        add("overall/auc_gate_for_label", _auc(y[m], T["g"][m]))
+        if "test/s_x" in pred:
+            sx = pred["test/s_x"][T["item"][m]]
+            add("overall/auc_text_agreement", _auc(right, np.where(says_fake[m], sx, -sx)))
 
         m = ~ov & decided & ~y
         right = ~says_fake[m]
@@ -263,19 +274,38 @@ def gate_under_noise(tag: str, name: str, runs: Runs, kind: str,
 
 
 def arg_gate_auc(ds: Dataset, tag: str, name: str, runs: Runs, source: str) -> Dict[str, float]:
-    """AUC of ARG's two rationale gates against the correctness of the LLM judgment they weight."""
+    """ARG: how well do (a) the fusion weights and (b) the usefulness predictor separate rationales
+    whose LLM judgment was right from those whose judgment was wrong?  For (b), also the mean
+    predicted usefulness by (LLM says fake?, label of the news)."""
     by_id = {it["id"]: it for it in ds.split("test")}
-    res: Dict[str, List[float]] = {"td": [], "cs": []}
+    acc: Dict[str, List[float]] = {}
+
+    def add(k, v):
+        if v == v:
+            acc.setdefault(k, []).append(float(v))
+
     for seed in sorted(runs):
         pred = load_preds(tag, name, seed)
         if pred is None or "test/gate" not in pred:
             continue
         its = [by_id[int(i)] for i in pred["test/id"]]
+        y = np.array([it["label"] == 1 for it in its])
         for j, k in enumerate(("td", "cs")):
             base = [(it["gpt"] if source == "gpt" else it)[k] for it in its]
-            right = np.array([b["pred"] == it["label"] for b, it in zip(base, its)])
-            res[k].append(_auc(right, pred["test/gate"][:, j]))
-    return {k: float(np.nanmean(v)) if v else float("nan") for k, v in res.items()}
+            judged = np.array([b["pred"] in (0, 1) for b in base])
+            says_fake = np.array([b["pred"] == 1 for b in base])
+            right = (says_fake == y) & judged
+            add(k + "/llm_acc", right[judged].mean())
+            add(k + "/auc_weight", _auc(right[judged], pred["test/gate"][judged, j]))
+            if "test/useful" in pred:
+                u = pred["test/useful"][:, j]
+                add(k + "/auc_useful", _auc(right[judged], u[judged]))
+                for sf, sname in ((True, "sayF"), (False, "sayR")):
+                    for yy, yname in ((True, "y1"), (False, "y0")):
+                        cell = judged & (says_fake == sf) & (y == yy)
+                        if cell.any():
+                            add("{}/cells/{}_{}".format(k, sname, yname), u[cell].mean())
+    return {k: float(np.mean(v)) for k, v in acc.items()}
 
 
 # --------------------------------------------------------------------------------------
@@ -291,20 +321,24 @@ def _sentence_scores(n_sents: int, sent_idx: np.ndarray, score: np.ndarray) -> n
 
 
 def localisation(ds_tamper: Dataset, tag: str, runs_by_name: Dict[str, Tuple[str, Runs]],
-                 max_claims: int = 6) -> Dict[str, Any]:
+                 max_claims: int = 6, only: Optional[set] = None) -> Dict[str, Any]:
     """Hit@1 / MRR of the tampered sentence.
 
     ``runs_by_name``: {row label: (experiment name, runs)}; the method of each row is inferred
-    from what its prediction file contains.
+    from what its prediction file contains.  ``only`` restricts the evaluation to a subset of
+    item ids (e.g. one kind of edit).
     """
     items = ds_tamper.split("test")
     by_id = {it["id"]: it for it in items}
     gold = {it["id"]: int(it["tamper_sent"]) for it in items}
+    use = (lambda i: True) if only is None else (lambda i: int(i) in only)
     out: Dict[str, Any] = {}
 
     # LLM alone: raw suspicion scores of the claims, mapped to sentences
     scores, golds, covered = [], [], []
     for it in items:
+        if not use(it["id"]):
+            continue
         inst = [x for x in instances(it, ds_tamper.lang, max_claims) if x["type"] != "overall"]
         sidx = np.array([x["sent"] for x in inst], dtype=int)
         scores.append(_sentence_scores(len(it["sents"]), sidx, np.array([x["v"] for x in inst])))
@@ -312,8 +346,8 @@ def localisation(ds_tamper: Dataset, tag: str, runs_by_name: Dict[str, Tuple[str
         covered.append(gold[it["id"]] in set(sidx.tolist()))
     out["LLM suspicion scores"] = dict(localisation_metrics(scores, golds), kind="llm")
     out["_claim_coverage"] = float(np.mean(covered))
-    out["_n_items"] = len(items)
-    out["_mean_sents"] = float(np.mean([len(it["sents"]) for it in items]))
+    out["_n_items"] = len(golds)
+    out["_mean_sents"] = float(np.mean([len(it["sents"]) for it in items if use(it["id"])]))
 
     for label, (name, runs) in runs_by_name.items():
         per_seed = []
@@ -326,6 +360,8 @@ def localisation(ds_tamper: Dataset, tag: str, runs_by_name: Dict[str, Tuple[str
             if "tamper/inst_g" in pred:                       # CLARA: claims -> sentences
                 T = instance_table(ds_tamper, items, pred, "tamper", r["config"]["model"])
                 for i, iid in enumerate(ids):
+                    if not use(iid):
+                        continue
                     m = (T["item"] == i) & (T["type"] != "overall")
                     sc.append(_sentence_scores(len(by_id[int(iid)]["sents"]), T["sent"][m].astype(int), T["p"][m]))
                     gd.append(gold[int(iid)])
@@ -333,12 +369,16 @@ def localisation(ds_tamper: Dataset, tag: str, runs_by_name: Dict[str, Tuple[str
             elif "tamper/inst_p" in pred:                     # CLARA-D: one unit per sentence
                 off = pred["tamper/off"]
                 for i, iid in enumerate(ids):
+                    if not use(iid):
+                        continue
                     sc.append(pred["tamper/inst_p"][off[i] + 1:off[i + 1]])
                     gd.append(gold[int(iid)])
                 kind = "sentences"
             elif "occl/prob" in pred:                         # black box: occlusion
                 occ = dict(zip(pred["occl/id"].tolist(), pred["occl/prob"].tolist()))
                 for i, iid in enumerate(ids):
+                    if not use(iid):
+                        continue
                     n = len(by_id[int(iid)]["sents"])
                     sc.append(np.array([pred["tamper/prob"][i] - occ[int(iid) * 100 + j] for j in range(n)]))
                     gd.append(gold[int(iid)])

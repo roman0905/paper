@@ -98,6 +98,8 @@ def _check(res, n_test=16):
     ("arg", {"rationale_source": "llm"}),
     ("factguard", {}),
     ("bert", {"use_zs": True}),
+    ("bert", {"text_source": "claims"}),
+    ("bert", {"text_source": "tc"}),
     ("factguard", {"use_zs": True}),
     ("arg_d", {}),
     ("factguard_d", {}),
@@ -298,6 +300,10 @@ def test_path_evals_and_analysis(session, tmp_path, monkeypatch):
     for k in ("LLM suspicion scores", "BERT + occlusion", "CLARA", "CLARA-D"):
         assert 0.0 <= loc[k]["hit@1"] <= 1.0 and loc[k]["n"] == 12
     assert 0.0 < loc["CLARA"]["chance"] < 1.0
+    half = {it["id"] for it in tam[:6]}
+    sub = analysis.localisation(ds_t, "toy", {"CLARA": ("clara", runs["clara"]), "BERT + occlusion": ("bert", runs["bert"]),
+                                               "CLARA-D": ("clara_d", runs["clara_d"])}, only=half)
+    assert sub["_n_items"] == 6 and all(sub[k]["n"] == 6 for k in ("CLARA", "BERT + occlusion", "CLARA-D"))
 
     det = analysis.tamper_detection(ds_t, "toy", "clara", runs["clara"])
     assert 0.0 <= det["pairwise_acc"] <= 1.0

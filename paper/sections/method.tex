@@ -1,30 +1,30 @@
 \section{问题定义}\label{sec:problem}
 
-给定一条新闻或社交媒体消息 $x$（仅文本），闭卷虚假新闻检测要求在\textbf{不检索任何外部证据}的条件下预测其真实性标签 $y\in\{0,1\}$（$1$ 表示虚假）。训练集 $\mathcal{D}=\{(x_i,y_i)\}$ 只含新闻级标签。除新闻级概率 $\hat y=P(y{=}1\mid x)$ 外，我们还希望模型给出：（i）新闻中各条声明存在问题的概率，用于定位；（ii）对 LLM 在每条声明上的分析是否可信的估计；（iii）在内容不足以判断时拒答的能力。
+给定一条新闻或社交媒体消息 $x$（仅文本），闭卷虚假新闻检测要求在\textbf{不检索任何外部证据}的条件下预测其真实性标签 $y\in\{0,1\}$（$1$ 表示虚假）。训练集 $\mathcal{D}=\{(x_i,y_i)\}$ 只含新闻级标签。除新闻级概率 $\hat y=P(y{=}1\mid x)$ 外，我们还希望模型（i）给出新闻中各条声明存在问题的概率，用于定位；（ii）能够判断 LLM 给出的每个分析单元是否可用，并在不可用时退回到只依赖新闻文本的判断。
 
 本文把 $x$ 视为一个由若干\emph{实例}组成的包（bag），沿用多示例学习（multiple instance learning, MIL）的标准假设\citep{dietterich1997solving,carbonneau2018mil}：记隐变量 $z_k\in\{0,1\}$ 表示第 $k$ 个实例是否存在问题，则
 \begin{equation}
 y=1 \iff \exists k,\ z_k=1 .\label{eq:mil}
 \end{equation}
-该假设蕴含一个不对称性：真新闻（$y{=}0$）的所有实例都满足 $z_k{=}0$，而假新闻（$y{=}1$）只保证至少一个实例有问题。\ref{sec:loss} 节利用这一不对称性，在没有任何声明级标注的情况下为门控构造监督信号。假设何时不成立见 \ref{sec:discussion} 节的讨论。
+该假设蕴含一个不对称性：真新闻（$y{=}0$）的所有实例都满足 $z_k{=}0$，而假新闻（$y{=}1$）只保证至少一个实例有问题。假设何时不成立见 \ref{sec:discussion} 节的讨论。
 
 \section{方法}\label{sec:method}
 
 \subsection{总体框架}
 
-\method{}（\textbf{C}laim-\textbf{L}evel \textbf{A}rgument \textbf{R}eliability \textbf{A}djudication）由一个冻结的 LLM 与一个可训练的小模型裁决器组成（图~\ref{fig:framework}）。LLM 对每条新闻只调用一次，输出结构化的“声明分解 + 正反论证”；裁决器读取新闻原文与 LLM 输出，在声明级决定采信 LLM 的程度，并聚合为新闻级判定。LLM 的输出可离线缓存，训练与推理阶段裁决器不再访问 LLM。
+\method{}（\textbf{C}laim-\textbf{L}evel \textbf{A}rgument \textbf{R}eliability \textbf{A}djudication）由一个冻结的 LLM 与一个可训练的小模型裁决器组成（图~\ref{fig:framework}）。LLM 把新闻分解为若干声明，并为每条声明写出正反两方论证；裁决器读取新闻原文与 LLM 的输出，逐个实例决定是否采用、采用多少，再聚合为新闻级判定。LLM 的输出离线生成并缓存，训练与推理阶段裁决器不再访问 LLM。
 
 \begin{figure}[t]
 \centering
 \resizebox{\linewidth}{!}{\input{figures/framework.tex}}
-\caption{\method{} 总体框架。LLM 单次调用产生整体实例（$k{=}0$）与 $K$ 条声明，每个实例附带支持论证 $a^+$、质疑论证 $a^-$ 与怀疑度 $v$。裁决器对每个实例计算 SLM 证据、LLM 证据与可靠性门控，经 noisy-OR 聚合后与整体文本分支融合。$\Delta\bm u_k$ 表示两方论证表示的差与逐元素积，$\tilde\gamma=\softplus(\gamma)$。虚线箭头表示只在训练时使用的监督信号。}
+\caption{\method{} 总体框架。LLM 产生整体实例（$k{=}0$）与 $K$ 条声明，每个实例附带支持论证 $a^+$、质疑论证 $a^-$ 与怀疑度 $v$。裁决器对每个实例计算 SLM 证据、LLM 证据、判定门控 $g$ 与相关性门控 $r$；$r\to0$ 的实例成为不携带证据的空实例。实例经 noisy-OR 聚合后，以“全为空实例的包”为基准与整体文本分支融合。$\Delta\bm u_k$ 表示两方论证表示的差与逐元素积，$\tilde\gamma=\softplus(\gamma)$。虚线表示只在训练时使用的监督信号。}
 \label{fig:framework}
 \end{figure}
 
-\subsection{单次调用的声明分解与双立场论证}\label{sec:llm}
+\subsection{声明分解与双立场论证}\label{sec:llm}
 
 \paragraph{输出结构}
-先用确定性规则把 $x$ 切分为句子 $s_1,\dots,s_n$（$n\le 12$）并编号。LLM 读取编号后的文本，按固定顺序生成一个 JSON 对象：
+先用确定性规则把 $x$ 切分为句子 $s_1,\dots,s_n$（$n\le 12$）并编号。LLM 读取编号后的文本，在一次调用中按固定顺序生成一个 JSON 对象：
 \begin{enumerate}
 \item \textbf{第一印象} $v^{\mathrm{fi}}$：在做任何分析之前，对“整条消息是虚假或误导性信息”的 1--5 级评分；
 \item \textbf{声明列表} $\{c_k\}_{k=1}^{K}$（$K\le 6$）：每条声明包含自包含的声明文本、类型 $t_k\in\{$事实、数字、引述、观点$\}$、所在句子编号 $j_k$、认为其可信的最强理由 $a_k^+$、认为其可疑的最强理由 $a_k^-$，以及 1--5 级怀疑度；
@@ -33,17 +33,17 @@ y=1 \iff \exists k,\ z_k=1 .\label{eq:mil}
 整体判断在裁决器中作为第 $0$ 个实例，用于覆盖标题与正文不符、来源不明、情绪煽动等无法归到单条声明上的问题。完整提示词见附录~\ref{app:prompt}。
 
 \paragraph{设计动机}
-与多轮辩论\citep{liu2025ted,han2025d2d}相比，这一设计有三点考虑。其一，把论证单位从“发言轮次”换成“声明”，每个声明都有成对的正反论证，裁决器可以直接比较两方；LLM 调用次数固定为 1。其二，要求 LLM 先写两方论证、最后才给评分，并禁止在论证中写结论，以减轻先下结论再找理由的立场锁定。其三，提示词要求保留归属（“某人称……”不得改写为既成事实），因为一条真新闻可以如实转述一个不实说法，丢掉归属会直接破坏式~\eqref{eq:mil} 的假设。
+与多轮辩论\citep{liu2025ted,han2025d2d}相比，这一设计有三点考虑。其一，把论证单位从“发言轮次”换成“声明”，每个声明都有成对的正反论证，裁决器可以直接比较两方，调用次数不随论证数量增长。其二，要求 LLM 先写两方论证、最后才给评分，并禁止在论证中写结论，以减轻先下结论再找理由的立场锁定。其三，提示词要求保留归属（“某人称……”不得改写为既成事实），因为一条真新闻可以如实转述一个不实说法，丢掉归属会直接破坏式~\eqref{eq:mil} 的假设。
 
 \paragraph{结构化解码与软评分}
 生成时用 JSON schema 约束解码\citep{kwon2023vllm,dong2024xgrammar}：声明数下限随句子数增加（$n\le2$ 时为 1，$n\le4$ 时为 2，否则为 3），句子编号限制在 $\{1,\dots,n\}$ 内。评分不直接使用生成的整数，而是取评分位置上五个等级 token 的概率 $\pi_\ell$ 并归一化，计算期望
 \begin{equation}
 v=\sum_{\ell=1}^{5}\frac{\ell-1}{4}\,\pi_\ell\in[0,1],
 \end{equation}
-同时保留归一化熵 $H(\pi)$ 作为 LLM 自身不确定性的度量。
+同时保留归一化熵 $H(\pi)$ 作为 LLM 自身不确定性的度量。为避免评分受最后写下的论证影响，我们按样本编号的奇偶确定性地交替 $a^+$ 与 $a^-$ 的书写顺序，使这一潜在偏置与标签无关。
 
-\paragraph{论证顺序平衡}
-LLM 的评分可能受最后写下的论证影响。我们按样本编号的奇偶确定性地交替 $a^+$ 与 $a^-$ 的书写顺序，使这一潜在偏置与标签无关。
+\paragraph{论证前的整体评分}
+整体实例除论证后的怀疑度 $v_0$ 外，还带有一个论证前的评分 $\tilde v_0$。默认取 LLM 对同一条消息的零样本判断概率 $p_{\mathrm{zs}}$：它来自一次只输出一个 token 的额外调用，取“0”“1”两个 token 的归一化概率。在从训练集抽取的开发样本上，$p_{\mathrm{zs}}$ 的区分度不低于提示内的第一印象 $v^{\mathrm{fi}}$。若要求严格的单次调用，可令 $\tilde v_0=v^{\mathrm{fi}}$，这一变体在消融实验中报告。
 
 \subsection{编码}\label{sec:enc}
 
@@ -57,79 +57,83 @@ LLM 的评分可能受最后写下的论证影响。我们按样本编号的奇�
 
 由于冻结层的输出与训练轮次无关，我们对每条序列只做一次冻结层前向并缓存其隐状态，训练时仅计算最后一层。这与每步重新计算的差别仅在于冻结层没有 dropout 噪声；附录~\ref{app:live} 核对了两者的一致性。
 
-\subsection{实例打分：SLM 证据与 LLM 证据}\label{sec:score}
+\subsection{实例证据}\label{sec:score}
 
 对每个实例计算两路证据：
 \begin{align}
 s_k^{\mathrm{slm}} &= \operatorname{MLP}_s(\bm c_k),\\
-s_k^{\mathrm{llm}} &= \operatorname{MLP}_a\!\big([\bm u_k^- - \bm u_k^+;\ \bm u_k^-\odot\bm u_k^+]\big)+\alpha\,\logit(v_k)+\mathbb{1}[k{=}0]\,\alpha_0\,\logit(v^{\mathrm{fi}}),
+s_k^{\mathrm{llm}} &= \operatorname{MLP}_a\!\big([\bm u_k^- - \bm u_k^+;\ \bm u_k^-\odot\bm u_k^+]\big)+\alpha\,\logit(v_k)+\mathbb{1}[k{=}0]\,\alpha_0\,\logit(\tilde v_0),
 \end{align}
 其中 $\alpha,\alpha_0$ 为可学习标量。$s^{\mathrm{llm}}$ 中的差分与逐元素积显式刻画两方论证的不对称，即“哪一方更容易被辩护”。
 
-\paragraph{实例特定的分解式结构}
-两路证据都只依赖该实例自身的输入：声明文本、它的两条论证与评分，而不依赖新闻整体表示 $\bm h_x$。这是有意为之。若实例打分可以看到整条新闻，noisy-OR 型 MIL 存在一个平凡解：每个实例都输出新闻级判断的副本。此时新闻级精度不受影响，但 $p_k$ 失去实例含义，定位无从谈起。新闻级的文本证据另有通道（\ref{sec:agg} 节的 $s_x$）。实验中我们把允许实例打分读取 $\bm e_k$ 与 $\bm h_x$ 的耦合变体作为消融对照。
+两路证据都只依赖该实例自身的输入：声明文本、它的两条论证与评分，而不依赖新闻整体表示 $\bm h_x$。这是有意为之。若实例证据可以看到整条新闻，noisy-OR 型 MIL 存在一个平凡解：每个实例都输出新闻级判断的副本。此时新闻级精度不受影响，但实例概率失去实例含义，定位无从谈起。新闻级的文本证据另有通道（\ref{sec:agg} 节的 $s_x$）。实验中我们把允许实例证据读取 $\bm e_k$ 与 $\bm h_x$ 的耦合变体作为消融对照。
 
-\subsection{声明级可靠性门控}\label{sec:gate}
+\subsection{相关性门控、判定门控与空实例}\label{sec:gate}
 
-LLM 在闭卷条件下只能依靠参数记忆与常识。它对某些声明的分析有信息量，对另一些（例如需要实时事实的数字）则可能是幻觉。门控估计“LLM 在该实例上的分析是否可信”：
+LLM 的输出在两个层面上可能不可用。第一，分析单元本身可能不是这条新闻的忠实分析：声明可能是幻觉出来的，或者整份分析与新闻对不上。第二，即使声明忠实于原文，LLM 对它的判断也可能是错的。\method{} 用两个门控分别处理：
+\begin{align}
+r_k&=\sigma\!\Big(\operatorname{MLP}_r\big([\bm e_k;\ \bm h_x;\ \bm c_k\odot\bm h_x;\ |\bm c_k-\bm h_x|;\ \bar{\bm u}_k\odot\bm h_x;\ |\bar{\bm u}_k-\bm h_x|]\big)\Big), &\bar{\bm u}_k&=\tfrac12(\bm u_k^++\bm u_k^-),\label{eq:rk}\\
+g_k&=\sigma\!\Big(\operatorname{MLP}_g\big([\bm e_k;\ \bm h_x;\ \bm u_k^+;\ \bm u_k^-;\ \operatorname{emb}(t_k);\ \bm\phi_k]\big)\Big),\label{eq:gk}
+\end{align}
+其中 $\bm\phi_k=[v_k,\ |v_k-0.5|,\ \tilde v_k,\ |\tilde v_k-v_k|,\ H(\pi_k)]$ 是由评分导出的特征（声明取 $\tilde v_k=v_k$）。\emph{相关性门控} $r_k$ 通过声明、论证与新闻表示之间的匹配特征判断该实例是否属于这条新闻；\emph{判定门控} $g_k$ 调节 LLM 证据的权重。实例存在问题的概率为
 \begin{equation}
-g_k=\sigma\!\Big(\operatorname{MLP}_g\big([\bm e_k;\ \bm h_x;\ \bm u_k^+;\ \bm u_k^-;\ \operatorname{emb}(t_k);\ \bm\phi_k]\big)\Big),
+p_k=\sigma\!\Big(b_0+r_k\big(s_k^{\mathrm{slm}}+g_k\,s_k^{\mathrm{llm}}\big)\Big),\label{eq:pk}
 \end{equation}
-其中 $\bm\phi_k=[v_k,\ |v_k-0.5|,\ \tilde v_k,\ |\tilde v_k-v_k|,\ H(\pi_k)]$ 是由评分导出的特征，$\tilde v_k$ 对整体实例取第一印象 $v^{\mathrm{fi}}$、对声明取 $v_k$。门控只缩放 LLM 证据，因此允许它读取上下文：
-\begin{equation}
-p_k=\sigma\!\big(s_k^{\mathrm{slm}}+g_k\,s_k^{\mathrm{llm}}\big).\label{eq:pk}
-\end{equation}
-$g_k\to0$ 时该实例退回到 SLM 自己的判断。
+其中 $b_0$ 是可学习的标量。当 $r_k\to0$ 时，$p_k\to\sigma(b_0)$，与实例内容无关：该实例退化为一个只携带先验的\emph{空实例}。LLM 输出无法解析的新闻，其实例直接取 $r_k=0$。
 
-\subsection{Noisy-OR 聚合与整体分支}\label{sec:agg}
+\subsection{Noisy-OR 聚合与以空包为基准的融合}\label{sec:agg}
 
 在实例相互独立的近似下，式~\eqref{eq:mil} 对应 noisy-OR 聚合\citep{maron1998framework}：
 \begin{equation}
 P_{\mathrm{MIL}}=1-\prod_{k=0}^{K}(1-p_k).
 \end{equation}
-MIL 实例只能把预测推向“假”，而新闻原文的整体表示在已有工作中贡献最大\citep{he2026factguard}，因此保留一个可以双向调节的整体文本分支：
+新闻原文的整体表示在已有工作中贡献最大\citep{he2026factguard}，因此保留一个整体文本分支 $s_x=\operatorname{MLP}_x(\bm h_x)$。两者的融合以“全部为空实例的包”为基准：
 \begin{equation}
-\hat y=\sigma\!\big(s_x+\softplus(\gamma)\cdot\logit(P_{\mathrm{MIL}})+b\big),\qquad s_x=\operatorname{MLP}_x(\bm h_x),
+\hat y=\sigma\!\Big(s_x+\softplus(\gamma)\cdot\big[\logit(P_{\mathrm{MIL}})-\logit(P_{\varnothing})\big]+b\Big),\qquad
+P_{\varnothing}=1-\big(1-\sigma(b_0)\big)^{K+1},\label{eq:fuse}
 \end{equation}
-其中 $\gamma,b$ 为可学习标量。
+其中 $\gamma,b$ 为可学习标量。方括号内是实例提供的、相对于“没有任何可用实例”的证据。它有两个作用。其一，当所有实例都是空实例时该项恰为 $0$，预测精确地退回到文本分支 $\sigma(s_x+b)$。其二，$P_{\varnothing}$ 随实例数变化，抵消了 noisy-OR“实例越多概率越高”的长度偏置。
 
-\subsection{训练目标与门控的弱监督}\label{sec:loss}
+\subsection{训练目标}\label{sec:loss}
 
 总损失为
 \begin{equation}
-\mathcal L=\operatorname{BCE}(\hat y,y)+\lambda_{\mathrm{mil}}\operatorname{BCE}(P_{\mathrm{MIL}},y)+\lambda_{\mathrm{gate}}\,\mathcal L_{\mathrm{gate}} .
+\mathcal L=\operatorname{BCE}(\hat y,y)+\lambda_{\mathrm{mil}}\operatorname{BCE}(P_{\mathrm{MIL}},y)+\lambda_{\mathrm{rel}}\,\mathcal L_{\mathrm{rel}}+\lambda_{\mathrm{gate}}\,\mathcal L_{\mathrm{gate}} .
 \end{equation}
-当 $y{=}0$ 时，$\operatorname{BCE}(P_{\mathrm{MIL}},0)=-\sum_k\log(1-p_k)$，即对真新闻的每个实例施加了精确的负监督。
+当 $y{=}0$ 时，$\operatorname{BCE}(P_{\mathrm{MIL}},0)=-\sum_k\log(1-p_k)$，即对真新闻的每个实例施加了精确的负监督，这是 MIL 不对称性带来的实例级监督。
 
-\paragraph{门控目标}
-门控的目标是“LLM 在该实例上是否站对了边”。记 LLM 的表态分数为 $\bar v_k$（整体实例取 $(v_0+v^{\mathrm{fi}})/2$，声明取 $v_k$），$\bar v_k>0.5+\delta$ 视为判其有问题，$\bar v_k<0.5-\delta$ 视为判其无问题，介于两者之间视为未表态，不参与门控损失。于是
+\paragraph{错配负例与相关性损失}
+现有数据中，每条新闻的 LLM 分析都是针对它自己生成的，模型没有机会学习“这份分析不属于这条新闻”。我们在训练时构造\emph{错配负例}：每个小批量中，每条新闻以概率 $\rho$ 被换上同一批内另一条新闻的全部 LLM 分析。被替换的新闻保留自己的标签，它的所有实例以 $r_k=0$ 为相关性目标，其余实例以 $r_k=1$ 为目标：
 \begin{equation}
-r_k=\tilde z_k\cdot\mathbb{1}[\bar v_k>0.5+\delta]+(1-\tilde z_k)\cdot\mathbb{1}[\bar v_k<0.5-\delta],
+\mathcal L_{\mathrm{rel}}=\overline{\operatorname{BCE}}\big(r_k,\ \mathbb{1}[\text{实例 }k\text{ 属于该新闻}]\big).
 \end{equation}
-其中 $\tilde z_k$ 是对隐状态 $z_k$ 的估计，分三种情况：
-\begin{itemize}
-\item \textbf{整体实例}：$\tilde z_0=y$，可直接观测；
-\item \textbf{真新闻中的声明}：由 MIL 不对称性，$\tilde z_k=0$，即 LLM 判对当且仅当它没有怀疑该声明；
-\item \textbf{假新闻中的声明}：$z_k$ 不可观测，用 noisy-OR 后验 $\tilde z_k=\sg\!\big[p_k/P_{\mathrm{MIL}}\big]$ 作为软责任（$\sg$ 表示停止梯度），在 $T_w$ 轮 warm-up 之后启用，并以权重 $\eta$ 计入。
-\end{itemize}
-$\mathcal L_{\mathrm{gate}}$ 是 $\operatorname{BCE}(g_k,r_k)$ 在已表态实例上的加权平均。与 ARG、FactGuard 的实例级可用性监督（整条理由只有一个“LLM 判断是否等于标签”的比特）相比，上述目标把监督下沉到了声明。
+被替换的新闻不参与 $\operatorname{BCE}(P_{\mathrm{MIL}},y)$ 与 $\mathcal L_{\mathrm{gate}}$，但参与 $\operatorname{BCE}(\hat y,y)$。由于此时实例被学成空实例，式~\eqref{eq:fuse} 中只剩文本分支，裁决器因此同时学到了在分析不可用时仅凭文本做判断。
+
+\paragraph{判定门控的弱监督}
+判定门控的监督目标是“LLM 在该实例上是否站对了边”。记 LLM 的表态分数为 $\bar v_k$（整体实例取 $(v_0+\tilde v_0)/2$，声明取 $v_k$），$\bar v_k>0.5+\delta$ 视为判其有问题，$\bar v_k<0.5-\delta$ 视为判其无问题，介于两者之间视为未表态，不参与该项损失。目标为
+\begin{equation}
+q_k=\hat z_k\cdot\mathbb{1}[\bar v_k>0.5+\delta]+(1-\hat z_k)\cdot\mathbb{1}[\bar v_k<0.5-\delta],
+\end{equation}
+其中 $\hat z_k$ 是对隐状态 $z_k$ 的估计：整体实例取 $\hat z_0=y$；真新闻中的声明由 MIL 不对称性取 $\hat z_k=0$；假新闻中的声明取 noisy-OR 后验 $\hat z_k=\sg[p_k/P_{\mathrm{MIL}}]$（$\sg$ 表示停止梯度），在 $T_w$ 轮 warm-up 之后启用并以权重 $\eta$ 计入。$\mathcal L_{\mathrm{gate}}$ 是 $\operatorname{BCE}(g_k,q_k)$ 在已表态实例上的加权平均。需要说明的是，这一监督信号很弱，判定门控实际学到了什么需要用实验检验，见 \ref{sec:exp-gate} 节。
 
 算法~\ref{alg:train} 给出完整的训练流程。
 
 \begin{algorithm}[t]
 \caption{\method{} 的训练}\label{alg:train}
-\KwIn{训练集 $\mathcal D$；冻结的 LLM；超参数 $\lambda_{\mathrm{mil}},\lambda_{\mathrm{gate}},\eta,\delta,T_w$}
+\KwIn{训练集 $\mathcal D$；冻结的 LLM；超参数 $\lambda_{\mathrm{mil}},\lambda_{\mathrm{rel}},\lambda_{\mathrm{gate}},\rho,\eta,\delta,T_w$}
 \KwOut{裁决器参数 $\theta$}
 \ForEach{$x\in\mathcal D_{\mathrm{train}}\cup\mathcal D_{\mathrm{val}}\cup\mathcal D_{\mathrm{test}}$}{
-  $A(x)\leftarrow\operatorname{LLM}(x)$\tcp*{一次调用，结果缓存}
+  $A(x)\leftarrow\operatorname{LLM}(x)$\tcp*{离线生成并缓存}
 }
 缓存所有序列的冻结层隐状态\;
 \For{$\mathrm{epoch}=0,1,\dots$}{
-  \ForEach{小批量 $(x,y,A)$}{
-    计算 $\bm h_x,\bm c_k,\bm e_k,\bm u_k^\pm$，以及 $s_k^{\mathrm{slm}},s_k^{\mathrm{llm}},g_k,p_k$\;
-    $P_{\mathrm{MIL}}\leftarrow1-\prod_k(1-p_k)$；$\hat y\leftarrow\sigma(s_x+\softplus(\gamma)\logit(P_{\mathrm{MIL}})+b)$\;
-    按 \ref{sec:loss} 节构造门控目标 $r_k$ 与权重；若 $\mathrm{epoch}<T_w$，假新闻声明的权重置 0\;
-    $\mathcal L\leftarrow\operatorname{BCE}(\hat y,y)+\lambda_{\mathrm{mil}}\operatorname{BCE}(P_{\mathrm{MIL}},y)+\lambda_{\mathrm{gate}}\mathcal L_{\mathrm{gate}}$；更新 $\theta$\;
+  \ForEach{小批量 $\{(x_i,y_i,A_i)\}$}{
+    以概率 $\rho$ 把 $A_i$ 替换为批内另一条新闻的分析，记 $m_i=1$（否则 $m_i=0$）\;
+    计算 $\bm h_x,\bm c_k,\bm e_k,\bm u_k^\pm$，以及 $s_k^{\mathrm{slm}},s_k^{\mathrm{llm}},r_k,g_k,p_k$\;
+    $P_{\mathrm{MIL}}\leftarrow1-\prod_k(1-p_k)$；按式~\eqref{eq:fuse} 计算 $\hat y$\;
+    $\mathcal L\leftarrow\operatorname{BCE}(\hat y,y)+\lambda_{\mathrm{rel}}\overline{\operatorname{BCE}}(r_k,1-m)$\;
+    对 $m_i=0$ 的新闻：$\mathcal L\mathrel{+}=\lambda_{\mathrm{mil}}\operatorname{BCE}(P_{\mathrm{MIL}},y)+\lambda_{\mathrm{gate}}\mathcal L_{\mathrm{gate}}$（$\mathrm{epoch}<T_w$ 时不含假新闻声明）\;
+    更新 $\theta$\;
   }
   在验证集上计算 macro-F1，按早停规则保留最优参数\;
 }
@@ -137,7 +141,7 @@ $\mathcal L_{\mathrm{gate}}$ 是 $\operatorname{BCE}(g_k,r_k)$ 在已表态实�
 
 \subsection{\student{}：声明到句子对齐的蒸馏}\label{sec:student}
 
-为了在推理时完全不调用 LLM，我们训练一个只读新闻的学生模型。学生以新闻的\emph{句子}为 MIL 实例（外加一个整体实例），沿用教师的 SLM 分支：$p_j^S=\sigma(\operatorname{MLP}_s(\bm c_j))$，聚合与融合方式同 \ref{sec:agg} 节。LLM 为每条声明给出的句子编号 $j_k$ 把教师的声明级概率对齐到句子：
+为了在推理时完全不调用 LLM，我们训练一个只读新闻的学生模型。学生以新闻的\emph{句子}为 MIL 实例（外加一个整体实例），沿用教师的 SLM 证据分支：$p_j^S=\sigma\big(b_0+\operatorname{MLP}_s(\bm c_j)\big)$，聚合与融合方式同式~\eqref{eq:fuse}。LLM 为每条声明给出的句子编号 $j_k$ 把教师的声明级概率对齐到句子：
 \begin{equation}
 t_j=\max_{k:\,j_k=j}p_k^{T},
 \end{equation}
@@ -145,12 +149,12 @@ t_j=\max_{k:\,j_k=j}p_k^{T},
 \begin{equation}
 \mathcal L_S=\operatorname{BCE}(\hat y^S,y)+\lambda_{\mathrm{mil}}\operatorname{BCE}(P^S_{\mathrm{MIL}},y)+\kappa_{o}\operatorname{BCE}(\hat y^S,\hat y^T)+\kappa_{i}\,\overline{\operatorname{BCE}}(p^S_j,t_j)+\kappa_{f}\operatorname{MSE}(\bm h^S_x,\bm h^T_x),
 \end{equation}
-参数由教师的对应模块初始化。ARG-D 与 FactGuard-D 只蒸馏池化后的特征向量，学生没有实例级输出；\student{} 的学生保留了句级定位能力。
+参数由教师的对应模块初始化。ARG-D 与 FactGuard-D 只蒸馏池化后的特征向量，学生没有实例级输出；\student{} 的学生保留了句级输出。
 
 \subsection{选择性预测}\label{sec:selective}
 
-闭卷条件下部分新闻无法从内容判定。除常用的 MaxProb 置信度 $|\hat y-0.5|$ 外，\method{} 的中间量提供了额外的“不可判”信号。我们在验证集上拟合一个逻辑回归选择器，预测裁决器自身的判定是否正确，输入特征为 $|\hat y-0.5|$、两分支分歧 $|P_{\mathrm{MIL}}-\sigma(s_x)|$、门控均值、$\max_k p_k$、$|P_{\mathrm{MIL}}-0.5|$ 与实例数的对数。选择器不接触测试标签。
+闭卷条件下部分新闻无法从内容判定。除常用的 MaxProb 置信度 $|\hat y-0.5|$ 外，我们在验证集上拟合一个逻辑回归选择器，预测裁决器自身的判定是否正确，输入特征为 $|\hat y-0.5|$、两分支分歧 $|P_{\mathrm{MIL}}-\sigma(s_x)|$、判定门控均值、$\max_k p_k$、$|P_{\mathrm{MIL}}-0.5|$ 与实例数的对数。选择器不接触测试标签。
 
 \subsection{开销}\label{sec:cost}
 
-每条新闻需要一次 LLM 调用，输出长度与声明数成正比。裁决器在 BERT-base 规模的编码器上增加一份最后一层副本与若干 MLP。每条新闻需要编码 $1+3(K{+}1)$ 条短序列（新闻、每个实例的声明及两个声明--论证对），其冻结层前向只做一次。实测开销见 \ref{sec:exp-cost} 节。
+默认配置下每条新闻需要一次结构化调用与一次只输出一个 token 的零样本调用。裁决器在 BERT-base 规模的编码器上增加一份最后一层副本与若干 MLP。每条新闻需要编码 $1+3(K{+}1)$ 条短序列（新闻、每个实例的声明及两个声明--论证对），其冻结层前向只做一次。实测开销见 \ref{sec:exp-cost} 节。

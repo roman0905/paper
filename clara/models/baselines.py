@@ -45,8 +45,22 @@ class ScoreFusion(nn.Module):
         return logit_ + self.w * data["zs"][idx] if self.enabled else logit_
 
 
+def _text_input(it, source: str, lang: str) -> str:
+    """Input text of the text-only classifier: the news itself (default) or a style-normalised
+    rendering of it produced by the LLM (its extracted claims / its topic-content summary)."""
+    if source == "content":
+        return it["content"]
+    if source == "claims":
+        c = it.get("clara")
+        return ("；" if lang == "zh" else " ; ").join(x["claim"] for x in c["claims"]) if c else it["content"]
+    if source == "tc":
+        return it.get("tc") or it["content"]
+    raise KeyError(source)
+
+
 class TextOnly(Method):
-    """cfg: ``use_zs`` adds the LLM zero-shot score by late fusion ("BERT + ZS")."""
+    """cfg: ``use_zs`` adds the LLM zero-shot score by late fusion ("BERT + ZS");
+    ``text_source`` in {"content", "claims", "tc"} selects what the classifier reads."""
 
     def __init__(self, cfg, store, lang):
         super().__init__(cfg, store, lang)
@@ -58,7 +72,9 @@ class TextOnly(Method):
     def prepare(self, items):
         return {
             "label": np.array([it["label"] for it in items], dtype=np.int64),
-            "content": self.store.register([it["content"] for it in items], max_len=self.cfg.get("max_len", 170)),
+            "content": self.store.register(
+                [_text_input(it, self.cfg.get("text_source", "content"), self.lang) for it in items],
+                max_len=self.cfg.get("max_len", 170)),
             "zs": zs_logit(items),
         }
 
