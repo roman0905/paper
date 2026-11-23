@@ -1,0 +1,17 @@
+\begin{tabular}{llcccc}
+\toprule
+ & & \multicolumn{2}{c}{Weibo21（中文）} & \multicolumn{2}{c}{GossipCop（英文）} \\
+\cmidrule(lr){3-4}\cmidrule(lr){5-6}
+LLM 的整体判断 & 新闻标签 & 占比（\%） & 平均 $g_0$ & 占比（\%） & 平均 $g_0$ \\
+\midrule
+判假 & 假（LLM 对） & 33.6 & 0.805 & 5.3 & 0.564 \\
+判假 & 真（LLM 错） & 17.6 & 0.656 & 7.3 & 0.815 \\
+判真 & 假（LLM 错） & 8.1 & 0.810 & 13.1 & 0.692 \\
+判真 & 真（LLM 对） & 40.7 & 0.625 & 74.3 & 0.842 \\
+\midrule
+\multicolumn{2}{l}{AUC：$g_0$ $\rightarrow$ LLM 的整体判断是否正确} & \multicolumn{2}{c}{0.482} & \multicolumn{2}{c}{0.680} \\
+\multicolumn{2}{l}{AUC：$g_0$ $\rightarrow$ 新闻是否为假} & \multicolumn{2}{c}{0.745} & \multicolumn{2}{c}{0.192} \\
+\multicolumn{2}{l}{AUC：LLM 自身置信度 $\rightarrow$ 判断是否正确} & \multicolumn{2}{c}{0.532} & \multicolumn{2}{c}{0.510} \\
+\multicolumn{2}{l}{AUC：文本分支与 LLM 是否一致 $\rightarrow$ 判断是否正确} & \multicolumn{2}{c}{0.760} & \multicolumn{2}{c}{0.858} \\
+\bottomrule
+\end{tabular}

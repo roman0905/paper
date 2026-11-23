@@ -297,6 +297,9 @@ def arg_gate_auc(ds: Dataset, tag: str, name: str, runs: Runs, source: str) -> D
             right = (says_fake == y) & judged
             add(k + "/llm_acc", right[judged].mean())
             add(k + "/auc_weight", _auc(right[judged], pred["test/gate"][judged, j]))
+            # reference: does the detector's own prediction agree with the LLM judgment?
+            prob = pred["test/prob"]
+            add(k + "/auc_own_agreement", _auc(right[judged], np.where(says_fake, prob, 1 - prob)[judged]))
             if "test/useful" in pred:
                 u = pred["test/useful"][:, j]
                 add(k + "/auc_useful", _auc(right[judged], u[judged]))

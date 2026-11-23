@@ -1,0 +1,17 @@
+\begin{tabular}{lcccccc}
+\toprule
+ & \multicolumn{3}{c}{Weibo21（中文）} & \multicolumn{3}{c}{GossipCop（英文）} \\
+\cmidrule(lr){2-4}\cmidrule(lr){5-7}
+方法 & AURC$\downarrow$ & Acc@90 & Acc@70 & AURC$\downarrow$ & Acc@90 & Acc@70 \\
+\midrule
+BERT & 13.75 & 79.23 & 83.25 & 6.26 & 88.60 & 91.99 \\
+LoRA-LLM & 7.37 & 82.63 & 89.68 & -- & -- & -- \\
+BERT+ZS & 14.44 & 80.64 & 84.14 & 5.08 & 89.88 & 92.92 \\
+ARG & 12.69 & 80.40 & 85.01 & 6.77 & 89.29 & 92.83 \\
+ARG + 选择器 & 12.28 & 79.87 & 83.25 & 5.97 & 89.47 & 93.35 \\
+FactGuard & 17.52 & 78.93 & 82.66 & 6.50 & 89.19 & 92.26 \\
+FactGuard + 选择器 & 14.57 & 78.58 & 80.85 & 6.06 & 89.29 & 92.53 \\
+\method{} & 15.86 & 80.28 & 84.17 & 6.52 & 89.58 & 92.62 \\
+\method{} + 选择器 & 11.11 & 80.13 & 83.51 & 5.81 & 89.68 & 93.64 \\
+\bottomrule
+\end{tabular}

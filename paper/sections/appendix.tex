@@ -23,7 +23,7 @@
 \section{实现细节}\label{app:impl}
 
 \paragraph{离线生成}
-LLM 输出用 vLLM\citep{kwon2023vllm} 批量生成。分析类提示（声明分解、零样本、CoT、ARG 的两个视角）采用贪心解码；topic-content 抽取沿用 FactGuard 仓库的温度 0.2；风格改写与事实篡改由 Qwen3-8B 在关闭思考模式、温度 0.3 下生成。声明分解的最大输出长度为 1{,}200 个 token，输出无法解析时以更宽松的约束重试一次。两个数据集共 15{,}522 条新闻，首次生成即可解析的比例为 \CNparseRate\%（中文）与 \ENparseRate\%（英文）。
+LLM 输出用 vLLM\citep{kwon2023vllm} 批量生成。分析类提示（声明分解、零样本、CoT、ARG 的两个视角）采用贪心解码；topic-content 抽取沿用 FactGuard 仓库的温度 0.2；风格改写与事实篡改由 Qwen3-8B 在关闭思考模式、温度 0.3 下生成。声明分解的最大输出长度为 1{,}200 个 token，输出无法解析时以更宽松的约束重试一次。两个数据集共 15{,}522 条新闻，首次生成即可解析的比例为 \ptwo{CN/cost/clara_first_attempt_rate}\%（中文）与 \ptwo{EN/cost/clara_first_attempt_rate}\%（英文），其余在重试后全部解析成功。
 
 \paragraph{裁决器}
 隐藏层维度 384，dropout 0.2；新闻、声明、声明--论证对的最大长度分别为 170、48 与 128 个 token。优化器为 Adam（FactGuard 按其官方实现用 AdamW），权重衰减 $5\times10^{-5}$。标量参数（$\alpha,\alpha_0,\gamma,b$ 以及 BERT+ZS 的融合权重 $w$）单独使用学习率 $10^{-2}$：在编码器的学习率下，Adam 在整个训练过程中至多把一个标量移动约 0.02，这类参数实际上不会离开初始值。可训练的编码器层用混合精度计算。
@@ -77,10 +77,10 @@ ARG-D 与 FactGuard-D 的蒸馏权重与学习率取自各自的官方脚本。\
 \section{受控测试集的构建细节}\label{app:perturb}
 
 \paragraph{风格改写}
-中文测试集 \CNstyleN{} 条中有 \CNstyleRew{} 条得到了可用的改写，英文 \ENstyleN{} 条中为 \ENstyleRew{} 条。被丢弃的主要是改写后长度超过原文 2.5 倍的短消息。作为事实保持程度的粗略代理，我们统计了原文中的数字串在改写后的保留比例：中文为 \CNdigitKept\%，英文为 \ENdigitKept\%。这只是一个代理指标，改写仍可能增删细节，这是 LLM 风格攻击的共同局限\citep{wu2024sheepdog}。
+中文测试集 \cnt{CN/perturb/style_n} 条中有 \cnt{CN/perturb/style_rewritten} 条得到了可用的改写，英文 \cnt{EN/perturb/style_n} 条中为 \cnt{EN/perturb/style_rewritten} 条。被丢弃的主要是改写后长度超过原文 2.5 倍的短消息。作为事实保持程度的粗略代理，我们统计了原文中的数字串在改写后的保留比例：中文为 \pone{CN/fact_preservation/kept_rate}\%，英文为 \pone{EN/fact_preservation/kept_rate}\%。这只是一个代理指标，改写仍可能增删细节，这是 LLM 风格攻击的共同局限\citep{wu2024sheepdog}。
 
 \paragraph{单句事实篡改}
-候选为测试集中至少含两句、且存在长度足够的句子的真新闻（中文 \CNtamperCand{} 条，英文 \ENtamperCand{} 条）。篡改模型给出的片段必须在句中恰好出现一次，替换后字母与数字内容必须发生变化，且替换不得改变分句结果。最终得到中文 \CNtamperN{} 条、英文 \ENtamperN{} 条，平均每条分别含 \CNtamperSents{} 与 \ENtamperSents{} 句。按篡改类型的定位结果见表~\ref{tab:loc-type}。
+候选为测试集中至少含两句、且存在长度足够的句子的真新闻（中文 \cnt{CN/perturb/tamper_candidates} 条，英文 \cnt{EN/perturb/tamper_candidates} 条）。篡改模型给出的片段必须在句中恰好出现一次，替换后字母与数字内容必须发生变化，且替换不得改变分句结果。最终得到中文 \cnt{CN/perturb/tamper_n} 条、英文 \cnt{EN/perturb/tamper_n} 条，平均每条分别含 \fone{CN/perturb/tamper_mean_sents} 与 \fone{EN/perturb/tamper_mean_sents} 句。按篡改类型的定位结果见表~\ref{tab:loc-type}。
 
 \begin{table}[h]
 \centering\small

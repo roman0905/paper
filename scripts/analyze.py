@@ -81,6 +81,20 @@ def significance(tag, runs, chosen, ref="clara"):
     return out
 
 
+def noise_significance(tag, runs, chosen):
+    """CLARA vs ARG / ARG with mismatch negatives on the fully replaced test sets."""
+    out = {}
+    for split in ("noise100", "unit100", "unit50"):
+        for base in ("arg", "arg_swap"):
+            if base in chosen:
+                a, b = need(runs, chosen["clara"]), runs[chosen[base]]
+                if all(split in r["metrics"] for r in list(a.values()) + list(b.values())):
+                    out["{}/{}".format(split, base)] = A.compare(tag, a, chosen["clara"], b, chosen[base], split=split)
+    if not out:
+        raise Missing("no replacement evaluations")
+    return out
+
+
 def noise_curves(runs, chosen):
     """macro-F1 under item-level (noiseXX) and unit-level (unitXX) replacement of the LLM analysis."""
     def curve(seeds, prefix, rates):
@@ -384,6 +398,7 @@ def cost_section(D, llm):
                                "completion": float(np.mean([r["completion_tokens"] for r in recs])), "n": len(recs)}
         if task == "clara":
             out["clara_second_attempt_rate"] = float(np.mean([r["attempt"] == 2 for r in recs]))
+            out["clara_first_attempt_rate"] = 1.0 - out["clara_second_attempt_rate"]
             out["clara_parse_rate"] = float(np.mean([r["parsed"] is not None for r in recs]))
     # wall-clock of the offline generation, from the log of the generation script
     log = os.path.join(ROOT, "outputs", "logs", "gen_{}.log".format(llm))
@@ -465,6 +480,7 @@ def main():
         section("grid", lambda: grid_table(runs))
         section("significance", lambda: significance(tag, runs, chosen))
         section("noise", lambda: noise_curves(runs, chosen))
+        section("noise_sig", lambda: noise_significance(tag, runs, chosen))
         section("gate", lambda: gate_section(ds, tag, runs, chosen))
         section("style", lambda: style_section(load_extra("style"), tag, runs, chosen))
         section("fact_preservation", lambda: fact_preservation(ds, load_extra("style")))

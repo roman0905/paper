@@ -1,0 +1,13 @@
+\begin{tabular}{llcccc}
+\toprule
+ & & \multicolumn{2}{c}{Weibo21（中文）} & \multicolumn{2}{c}{GossipCop（英文）} \\
+\cmidrule(lr){3-4}\cmidrule(lr){5-6}
+方法 & 单位 & Hit@1 & MRR & Hit@1 & MRR \\
+\midrule
+随机猜测 & 句子 & 30.0 & -- & 19.8 & -- \\
+LLM 怀疑度评分（不训练） & 声明 & 35.7 & 59.2 & 22.8 & 47.1 \\
+BERT + 遮挡归因 & 句子 & 33.2\pmstd{1.2} & 58.4 & 22.2\pmstd{1.0} & 46.5 \\
+LoRA-LLM + 遮挡归因 & 句子 & 39.2\pmstd{0.0} & 62.7 & -- & -- \\
+\method{} & 声明 & 36.2\pmstd{0.8} & 59.6 & 23.2\pmstd{0.6} & 47.0 \\
+\bottomrule
+\end{tabular}
