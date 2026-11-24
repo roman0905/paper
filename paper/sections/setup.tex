@@ -32,6 +32,7 @@ TED\citep{liu2025ted} 的官方仓库在本文写作时尚未放出代码，D2D\
 \item \textbf{相同的学习率搜索}：每个方法都在 $\{2\times10^{-5},5\times10^{-5}\}$ 上运行（即 ARG 与 FactGuard 官方配置在两个数据集上使用的两个值），按种子平均的验证集 macro-F1 选择。全部网格点的结果见附录表~\ref{tab:grid}。
 \item \textbf{基线超参数}：ARG 与 FactGuard 的损失权重取自各自官方脚本。
 \end{enumerate}
+
 为了在单张显卡上完成全部多种子实验，各 SLM 类方法训练时缓存冻结编码器层的输出，可训练的层使用混合精度；附录~\ref{app:live} 在全精度下复核了主实验，定性结论不变。
 
 \method{} 的损失权重等超参数为预先设定的固定值，没有做搜索：$\lambda_{\mathrm{mil}}{=}0.5$，$\lambda_{\mathrm{rel}}{=}0.5$，$\lambda_{\mathrm{gate}}{=}0.3$，错配负例比例 $\rho{=}0.2$，$\eta{=}0.5$，$\delta{=}0.05$，$T_w{=}2$，$K\le6$，$b_0$ 初始化为 $-2$；敏感性分析见附录~\ref{app:sens}。所有模块与基线一样使用同一个学习率。
