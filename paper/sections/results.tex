@@ -149,6 +149,20 @@ LLM 评分偏离 0.5 的程度对其判断是否正确的 AUC 只有 \fthree{CN/
 \paragraph{丢弃被替换的声明并不总是没有代价}
 \ref{sec:exp-noise} 节指出，声明被逐条替换时 \method{} 可以丢弃声明、依靠整体实例。Weibo21 上的消融印证了这一机制：去掉整体实例的变体在全部声明被替换时降到 \ptwo{CN/ablation/no_overall/unit100/mean}，显著低于完整模型（\ptwo{CN/ablation/full/unit100/mean}）。但在 GossipCop 上，完整模型在同一条件下为 \ptwo{EN/ablation/full/unit100/mean}，显著低于从一开始就不使用声明的变体（\ptwo{EN/ablation/no_claims/unit100/mean}，该变体不受声明替换影响）。相关性门控识别出了被替换的声明，但裁决器在该数据集上平时依赖声明实例（\ref{sec:exp-gate} 节），退回之后的表现不如从未使用声明的模型。
 
+\subsection{学生模型}\label{sec:exp-distill}
+
+\begin{table}[!htbp]
+\centering\small
+\caption{推理时不调用 LLM 的学生模型（macro-F1，\%，3 个种子）。“其教师”为同一次运行中训练的教师模型的结果。$^{*}$ 表示与同样种子的 BERT 相比差异显著。}\label{tab:distill}
+\fittable{tables/distill.tex}
+\end{table}
+
+\paragraph{蒸馏得到的学生都没有显著超过 BERT}
+表~\ref{tab:distill} 给出三种方法的学生模型。在 Weibo21 上，ARG-D（\ptwo{CN/distill/arg_d/test/mean}）、FactGuard-D（\ptwo{CN/distill/factguard_d/test/mean}）与 \student{}（\ptwo{CN/distill/clara_d/test/mean}）都没有超过同样种子的 BERT（\ptwo{CN/distill/bert/test/mean}）。在 GossipCop 上 \student{} 为 \ptwo{EN/distill/clara_d/test/mean}，比 BERT 高 \ptwo{EN/distill/clara_d/vs_bert/diff_mean} 个点，但差异不显著（$p_{\text{样本}}=\fthree{EN/distill/clara_d/vs_bert/bootstrap/p}$，$p_{\text{种子}}=\fthree{EN/distill/clara_d/vs_bert/welch_p}$）；ARG-D 与 BERT 持平，FactGuard-D 更低。各教师模型本身相对 BERT 的优势就在 1 个点左右且大多不显著，学生再损失一部分之后，“把 LLM 的知识蒸馏进小模型”在本文的设置下没有留下可测的收益。原论文报告 ARG-D 比 BERT 高约 1.3--1.8 个点\citep{hu2024bad}，在本文的多种子复现中没有重现。
+
+\paragraph{声明到句子的对齐蒸馏没有带来定位能力}
+\student{} 的设计目标之一是保留句级定位。表~\ref{tab:loc} 显示这一目标没有实现：它在 Weibo21 上的 Hit@1 为 \pone{CN/localisation/CLARA-D/hit@1}\%，与随机猜测（\pone{CN/localisation/CLARA-D/chance}\%）相同；在 GossipCop 上为 \pone{EN/localisation/CLARA-D/hit@1}\%（随机 \pone{EN/localisation/CLARA-D/chance}\%）。去掉实例级蒸馏、甚至完全不用教师的句子级 MIL 变体，定位结果都在同一水平。教师的声明级概率本身几乎不含位置信息（\ref{sec:exp-loc} 节），对齐到句子之后自然无从蒸馏。
+
 \subsection{未见领域}\label{sec:exp-lodo}
 
 \begin{table}[!htbp]

@@ -1,0 +1,14 @@
+\begin{tabular}{lcccc}
+\toprule
+ & \multicolumn{2}{c}{Weibo21（中文）} & \multicolumn{2}{c}{GossipCop（英文）} \\
+\cmidrule(lr){2-3}\cmidrule(lr){4-5}
+模型 & 学生 & 其教师 & 学生 & 其教师 \\
+\midrule
+BERT（同样的 3 个种子） & 76.38\pmstd{0.09} & -- & 76.87\pmstd{1.58} & -- \\
+ARG-D & 76.41\pmstd{0.50} & 77.20\pmstd{0.33} & 76.92\pmstd{0.72} & 77.21\pmstd{0.80} \\
+FactGuard-D & 75.98\pmstd{0.57} & 76.78\pmstd{0.77} & 75.85\pmstd{1.13} & 77.23\pmstd{0.11} \\
+\student{} & 75.98\pmstd{0.74} & 77.21\pmstd{0.69} & 77.92\pmstd{0.19} & 78.50\pmstd{0.54} \\
+\student{}：去掉实例级蒸馏 & 76.39\pmstd{0.73} & 77.16\pmstd{0.69} & 77.67\pmstd{0.36} & 78.50\pmstd{0.61} \\
+\student{}：无教师（仅句子级 MIL） & 76.34\pmstd{1.10} & -- & 76.82\pmstd{0.68} & -- \\
+\bottomrule
+\end{tabular}

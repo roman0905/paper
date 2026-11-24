@@ -504,7 +504,7 @@ def cross_section(D, llm, ds, ds_tamper, chosen):
     return out
 
 
-def distill_section(runs, chosen):
+def distill_section(tag, runs, chosen):
     """LLM-free students (3 seeds), their teachers in the same runs, and BERT on the same seeds."""
     names = ["arg_d", "factguard_d", "clara_d", "clara_d-no_inst", "clara_d-no_teacher"]
     out = {}
@@ -523,6 +523,11 @@ def distill_section(runs, chosen):
     bert = runs[chosen["bert"]]
     same = {s: r for s, r in bert.items() if s in runs["clara_d"]}
     out["bert"] = {"test": ms(r["metrics"]["test"]["macf1"] for r in same.values())}
+    for n in names:                 # every student against BERT on the same seeds
+        if n in out:
+            common = sorted(set(runs[n]) & set(bert))
+            out[n]["vs_bert"] = A.compare(tag, {s: runs[n][s] for s in common}, n,
+                                          {s: bert[s] for s in common}, chosen["bert"])
     return out
 
 
@@ -686,7 +691,7 @@ def main():
         section("live", lambda: live_section(D, args.llm, runs, chosen))
         section("official_arg", lambda: official_arg_section(D, runs, res))
         section("cross", lambda: cross_section(D, args.llm, ds, load_extra("tamper"), chosen))
-        section("distill", lambda: distill_section(runs, chosen))
+        section("distill", lambda: distill_section(tag, runs, chosen))
         section("llm2", lambda: llm2_section(D, chosen, args.llm2, runs))
         section("derived", lambda: derived_section(res))
 

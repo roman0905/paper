@@ -68,10 +68,12 @@ ARG-D 与 FactGuard-D 的蒸馏权重与学习率取自各自的官方脚本。\
 
 \section{敏感性分析}\label{app:sens}
 
+\method{} 的损失权重与错配负例比例是预先设定的。图~\ref{fig:sens} 给出每个超参数另取两个值时的结果，以及声明数上限 $K$ 的影响。
+
 \begin{figure}[H]
 \centering
 \includegraphics[width=\linewidth]{figures/sensitivity.pdf}
-\caption{\method{} 对声明数上限 $K$ 与两个损失权重的敏感性（3 个种子，阴影为标准差）。灰色横线为 BERT。}\label{fig:sens}
+\caption{\method{} 对声明数上限 $K$（两个数据集）以及错配负例比例 $\rho$ 与三个损失权重（Weibo21）的敏感性。每个点为 3 个种子的均值，阴影为标准差；标“默认”的点是正文使用的取值在相同 3 个种子上的结果。灰色横线为 BERT。}\label{fig:sens}
 \end{figure}
 
 \section{受控测试集的构建细节}\label{app:perturb}

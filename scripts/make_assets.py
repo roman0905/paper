@@ -429,7 +429,8 @@ def tab_distill(A):
         cells = []
         for D in DS:
             r = A[D]["distill"].get(key)
-            cells += [pm(r["test"]) if r else "--", pm(r["teacher"]) if r and "teacher" in r else "--"]
+            star = "$^{*}$" if r and both_sig(r.get("vs_bert")) else ""
+            cells += [pm(r["test"]) + star if r else "--", pm(r["teacher"]) if r and "teacher" in r else "--"]
         if any(c != "--" for c in cells):
             out.append(label + " & " + " & ".join(cells) + r" \\")
     out += [r"\bottomrule", r"\end{tabular}"]
