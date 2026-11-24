@@ -40,14 +40,40 @@ ARG-D 与 FactGuard-D 的蒸馏权重与学习率取自各自的官方脚本。\
 \paragraph{与官方设置的差异}
 （1）LLM 输出。ARG 官方使用 GPT-3.5 的理由。FactGuard 官方用本地部署的 DeepSeek-R1-Distill-Llama-8B（中文）与 SOLAR-10.7B（英文）抽取 topic-content，要求抽取结果与原文的余弦相似度超过阈值，否则重新抽取；其常识理由沿用 ARG 数据中的 GPT-3.5 理由\citep{he2026factguard}。本文把所有 LLM 输出统一为 Qwen2.5-7B；topic-content 用其官方仓库中的提示一次生成，没有做相似度过滤与重试，这可能对 FactGuard 不利。（2）编码器。FactGuard 官方在中文上使用 bert-base-chinese、英文上使用 RoBERTa，本文为所有方法统一了编码器。（3）FactGuard 的损失。可用性损失以 LLM 判断 $y_{\mathrm{llm}}$ 为目标；当 LLM 未给出明确判断时，本文取目标为 0.5。文本损失中 topic-content 分支的目标按论文公式取标签 $y$。前向计算与官方代码一致，包括其中以 topic-content 代替新闻原文参与交叉注意力的做法。（4）官方脚本只给出单个随机种子的配置，本文为多种子均值。（5）训练时冻结层的输出取自缓存，可训练层使用混合精度（附录~\ref{app:live}）。因此本文复现的数值与原论文不可直接比较，原论文报告的数值见 \ref{sec:main-results} 节。
 
-\section{冻结层缓存的核对}\label{app:live}
+\section{训练协议的核对：冻结层缓存与混合精度}\label{app:live}
 
-表~\ref{tab:live} 比较了“缓存冻结层输出”与“每步重新计算冻结层（不缓存、不使用混合精度）”两种训练方式，后者与官方实现的计算完全一致。
+为了在单张显卡上完成全部多种子实验，本文的 SLM 类方法在训练时做了两点工程上的改动：冻结的编码器层只前向一次，其输出以半精度缓存；可训练的层用混合精度计算。官方实现每一步都重新计算冻结层，并且全程使用单精度。本附录核对这两点改动是否影响结论。
+
+\paragraph{三种训练方式}
+表~\ref{tab:live} 在 Weibo21 上用相同的 3 个种子比较三种训练方式：本文的协议（缓存加混合精度）、缓存加全精度，以及每步重新计算冻结层（全精度，与官方实现的计算一致）。缓存本身没有可见的影响：后两种方式在三种方法上的差别都在 0.3 个点以内，训练时间则缩短为原来的十分之一以下。BERT 与 \method{} 在三种方式下没有差别；使用 GPT-3.5 理由的 ARG 在混合精度下比另外两种方式低约 1 个点。
 
 \begin{table}[H]
 \centering\small
-\caption{缓存与每步重算的对比（Weibo21，3 个种子）。时间为单次运行（含评测）的平均秒数。}\label{tab:live}
+\caption{三种训练方式的对比（Weibo21，3 个种子）。时间为单次运行（含评测）的平均秒数。}\label{tab:live}
 \fittable{tables/live.tex}
+\end{table}
+
+\paragraph{主实验配置在全精度下的复核}
+鉴于上表中 ARG 的差别，我们把主实验中各 SLM 类方法被选中的配置在全精度下用同样的 5 个种子重新训练了一遍（表~\ref{tab:fp32}）。在两个数据集、五种方法共十组对比中，没有一组在两种检验下都显著。BERT、BERT+ZS 与 \method{} 在两种精度下的逐种子结果几乎相同，同一种子的平均绝对差不超过 0.2 个点。ARG 与 FactGuard 则不然：同一种子在两种精度下平均相差 0.6--1.2 个点，最大相差 \ptwo{EN/fp32/methods/factguard/abs_diff_max} 个点，早停选中的轮次也多半不同。对这两种方法，改变数值精度的效果相当于换了一个随机种子。均值变化最大的是 GossipCop 上的 FactGuard，全精度下低 \ptwo{EN/derived/factguard_amp_minus_fp32} 个点（$p_{\text{样本}}\peq{EN/fp32/methods/factguard/bootstrap/p}$，$p_{\text{种子}}\peq{EN/fp32/methods/factguard/welch_p}$）。
+
+使用 GPT-3.5 理由、官方学习率的 ARG 是唯一接近显著的配置：5 个种子上混合精度为 \ptwo{CN/official_arg/ours_cached/mean}，全精度为 \ptwo{CN/official_arg/ours_fp32/mean}（$p_{\text{样本}}\peq{CN/official_arg/amp_vs_fp32/bootstrap/p}$，$p_{\text{种子}}\peq{CN/official_arg/amp_vs_fp32/welch_p}$），后者与官方代码的多种子均值（\ptwo{CN/official_arg/mean}）一致。按本文的标准这一差别不算显著，但不能排除混合精度对这一配置略有不利；换成 Qwen2.5-7B 的理由后，同一方法在 Weibo21 上两种精度的均值几乎相同（表~\ref{tab:fp32}）。
+
+\begin{table}[H]
+\centering\small
+\caption{主实验配置在混合精度（本文的协议）与全精度下的测试集 macro-F1（\%，相同的 5 个种子）。$p$ 值检验同一方法在两种精度下的差异。}\label{tab:fp32}
+\fittable{tables/fp32.tex}
+\end{table}
+
+\paragraph{对主要比较的影响}
+表~\ref{tab:fp32-sig} 给出两种精度下 \method{} 与各方法的差异。两种精度下一致的是：\method{} 与 ARG、BERT+ZS 在原始测试集上的差异都不显著；全部分析被整条替换时它与 ARG 没有差别。不一致的有两处。其一，混合精度下唯一显著的一组比较（Weibo21 上对 FactGuard）在全精度下不再显著，而 GossipCop 上对 FactGuard 的比较在全精度下变为显著（\dptwo{EN/fp32/clara_vs/factguard/diff_mean} 个点）；\method{} 自身的数值几乎没有变，变的是 FactGuard。其二，Weibo21 上全部声明被逐条替换时，\method{} 对 ARG 的优势在全精度下为 \ptwo{CN/fp32/clara_vs/arg_unit100/diff_mean} 个点，两种检验都显著；混合精度下为 \ptwo{CN/noise_sig/unit100/arg/diff_mean} 个点，只有对样本的检验显著。
+
+总的来说，正文的定性结论（\method{} 在分布内与 ARG、BERT+ZS 持平）不依赖数值精度；而 1 个点左右的差异会随数值精度这样与方法无关的实现细节出现或消失，不宜据此给方法排序。这次复核只覆盖原始测试集与两种替换测试，风格改写、事实篡改、消融、蒸馏与留一领域等其余实验只在混合精度下运行过。
+
+\begin{table}[H]
+\centering\footnotesize
+\setlength{\tabcolsep}{3pt}
+\caption{两种精度下 \method{} 与各方法的 macro-F1 之差（\method{} 减去对方，百分点）与两种检验的 $p$ 值（5 个种子）。}\label{tab:fp32-sig}
+\fittable{tables/fp32_sig.tex}
 \end{table}
 
 \section{学习率网格的全部结果}
@@ -62,13 +88,13 @@ ARG-D 与 FactGuard-D 的蒸馏权重与学习率取自各自的官方脚本。\
 
 \begin{table}[H]
 \centering\small
-\caption{\method{} 与各方法在测试集 macro-F1 上的差异（\method{} 减去对方）。置信区间与 $p$ 值来自对测试样本的配对 bootstrap。}\label{tab:sig}
+\caption{\method{} 与各方法在测试集 macro-F1 上的差异（\method{} 减去对方，百分点）。置信区间与 $p_{\text{样本}}$ 来自对测试样本的配对 bootstrap，$p_{\text{种子}}$ 来自对随机种子的 Welch 检验。}\label{tab:sig}
 \fittable{tables/sig.tex}
 \end{table}
 
 \section{敏感性分析}\label{app:sens}
 
-\method{} 的损失权重与错配负例比例是预先设定的。图~\ref{fig:sens} 给出每个超参数另取两个值时的结果，以及声明数上限 $K$ 的影响。
+\method{} 的损失权重与错配负例比例是预先设定的。图~\ref{fig:sens} 给出每个超参数另取两个值时的结果，以及声明数上限 $K$ 的影响。各取值与默认值在相同种子上的差距都不超过 1 个点，没有一个在两种检验下都显著：差距最大的是 GossipCop 上 $K{=}1$（\dptwo{EN/claims_k/1/vs_default/diff_mean} 个点，$p_{\text{样本}}\peq{EN/claims_k/1/vs_default/bootstrap/p}$，$p_{\text{种子}}\peq{EN/claims_k/1/vs_default/welch_p}$）与 Weibo21 上 $\lambda_{\mathrm{gate}}{=}1$（\dptwo{CN/lambda_gate/1/vs_default/diff_mean} 个点，$p_{\text{样本}}\peq{CN/lambda_gate/1/vs_default/bootstrap/p}$，$p_{\text{种子}}\peq{CN/lambda_gate/1/vs_default/welch_p}$）。在 Weibo21 上，把声明数上限从 6 降到 1，macro-F1 只变化 \dptwo{CN/claims_k/1/vs_default/diff_mean} 个点；把多示例损失或判定门控损失的权重置零也没有可测的影响（\dptwo{CN/lambda_mil/0/vs_default/diff_mean} 与 \dptwo{CN/lambda_gate/0/vs_default/diff_mean} 个点），这与正文消融实验的结论一致：声明级的结构对分布内精度的贡献很小。由于每个取值只有 3 个种子，这里的比较只能排除大的效应。
 
 \begin{figure}[H]
 \centering
@@ -92,7 +118,9 @@ ARG-D 与 FactGuard-D 的蒸馏权重与学习率取自各自的官方脚本。\
 
 \section{样例}\label{app:cases}
 
-下面两条样例按预先固定的规则选出：篡改测试集中按编号排序、含 3--4 句且不超过 170 个字符的前两条，取随机种子 1 的模型输出，未做任何人工挑选。被篡改的句子与其原句用〔〕标出；表中 $+$ 与 $-$ 分别为 LLM 写出的支持论证与质疑论证。
+下面两条样例按预先固定的规则选出：篡改测试集中按编号排序、含 3--4 句且不超过 170 个字符的前两条，取随机种子 1 的模型输出，未做任何人工挑选。被篡改的句子与其原句用〔〕标出；表中 $+$ 与 $-$ 分别为 LLM 写出的支持论证与质疑论证，$v_k$、$r_k$、$g_k$、$p_k$ 依次为 LLM 的怀疑度、相关性门控、判定门控与实例概率。
+
+两条样例反映了正文中的几点观察。其一，两条篡改后的新闻都没有被判为假（$\hat y$ 接近 0），与表~\ref{tab:tamper} 一致。其二，对应被改句子的声明在各条声明中 $p_k$ 最高，定位是对的，但数值本身远低于 0.5。其三，7B 模型写出的论证质量不稳定：样例 1 中“支持”一栏写的其实是质疑；样例 2 中声明 3 的质疑论证称“具体日期和发言人姓名未明确提及”，而原文两者都有。这条与文本不符的论证并没有被相关性门控关闭：两条样例中所有声明的 $r_k$ 都接近 1。样例 2 的整体实例 $r_0$ 较低（0.40），从单个样例无法判断其原因。
 
 \input{tables/cases.tex}
 

@@ -1,1 +1,6 @@
-% placeholder
+\begin{abstract}
+\noindent
+在不检索外部证据的闭卷条件下，利用大语言模型（LLM）辅助小模型检测虚假新闻的方法，通常让 LLM 为整条新闻写一段分析理由，再由小模型决定采信多少。本文提出 \method{}：LLM 把新闻分解为原子声明，并为每条声明写出正反两方论证；小模型以声明为实例做多示例学习，用相关性门控剔除不属于该新闻的分析单元，在分析不可用时退回到只依赖文本的判断。我们在统一 LLM、统一学习率搜索、多随机种子并做显著性检验的条件下，把它与 ARG、FactGuard、LoRA 微调的 LLM 以及一个只融合 LLM 零样本评分的简单基线比较，并设计了分析替换、风格改写、单句事实篡改与留一领域四项受控测试。主要结果如下。（1）\method{} 在分布内与已有协同方法持平：macro-F1 在 Weibo21 上为 \ptwo{CN/main/clara/macf1}（ARG \ptwo{CN/main/arg/macf1}），在 GossipCop 上为 \ptwo{EN/main/clara/macf1}（ARG \ptwo{EN/main/arg/macf1}），差异均不显著；简单融合基线同样有效（\ptwo{CN/main/bert_zs/macf1} 与 \ptwo{EN/main/bert_zs/macf1}），并且在未见领域上显著优于 \method{}。（2）消融显示，论证文本、声明分解与判定门控对精度没有可测的贡献。（3）相关性门控能识别来自其他新闻的分析单元（AUC 约 0.99），使模型在分析被替换时不至于崩溃，但它识别不了同话题而与文本事实不符的分析；判定门控与 ARG 的可用性机制学到的都是对新闻标签的预测，而不是 LLM 判断的可靠程度。（4）把假新闻改写成通稿文风、真新闻改写成营销号文风后，Weibo21 上各小模型方法的 macro-F1 降到 50--53，LLM 自身零样本判断的 AUC 从 \pone{CN/style_llm/zero-shot P(fake)/auc_orig} 降到 \pone{CN/style_llm/zero-shot P(fake)/auc_style}；各方法对单句事实改动几乎没有反应。这些结果表明，在闭卷条件下把 LLM 的分析做得更细，并不能改变检测器主要依赖文风这一事实。我们据此对这类方法的评测提出建议。
+
+\medskip\noindent\textbf{关键词：}虚假新闻检测；大语言模型；多示例学习；声明分解；鲁棒性评测
+\end{abstract}
