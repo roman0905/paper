@@ -290,7 +290,7 @@ def case_section(ds_tamper, tag, runs, chosen, n=2, seed=1, max_chars=170):
         assert len(inst) == len(m)
         rows = [{"claim": x["claim"], "type": x["type"], "sent": int(x["sent"]), "v": float(x["v"]),
                  "v0": float(x["v0"]), "support": x["support"], "refute": x["refute"],
-                 "g": float(T["g"][j]), "p": float(T["p"][j])} for x, j in zip(inst, m)]
+                 "g": float(T["g"][j]), "r": float(T["r"][j]), "p": float(T["p"][j])} for x, j in zip(inst, m)]
         cases.append({"id": int(it["id"]), "sents": it["sents"], "tamper_sent": int(it["tamper_sent"]),
                       "orig_sentence": it["orig_sentence"], "new_sentence": it["new_sentence"],
                       "change_type": it["change_type"], "prob": float(pred["tamper/prob"][i]),
@@ -301,19 +301,28 @@ def case_section(ds_tamper, tag, runs, chosen, n=2, seed=1, max_chars=170):
 
 
 def selective_section(tag, runs, chosen):
-    out, curves = {}, {}
+    out, curves, aurc = {}, {}, {}
     for base in ["bert", "lora", "bert_zs", "arg", "factguard", "clara", "clara_d"]:
         if base not in chosen:
             continue
         name = chosen[base]
-        s = A.selective_summary(tag, name, runs[name])
-        if s:
-            out[base] = s
-            for kind in s:
+        per = A.selective_per_seed(tag, name, runs[name])
+        if per:
+            out[base] = {kind: {k: float(np.mean(v)) for k, v in d.items()} for kind, d in per.items()}
+            for kind, d in per.items():
+                aurc["{}/{}".format(base, kind)] = d["aurc"]
+                out[base][kind]["aurc_std"] = float(np.std(d["aurc"], ddof=1)) if len(d["aurc"]) > 1 else 0.0
+                out[base][kind]["n_seeds"] = len(d["aurc"])
                 grid, c = A.risk_coverage_curve(tag, name, runs[name], kind)
                 curves["{}/{}".format(base, kind)] = {"coverage": grid.tolist(), "accuracy": c.tolist()}
     if "clara" not in out:
         raise Missing("no predictions for CLARA")
+    # AURC of CLARA with its selector against every other confidence, over seeds (the AURC has
+    # no paired bootstrap here, so this is the only test: treat it as indicative)
+    ref = aurc.get("clara/selector")
+    if ref:
+        out["_selector_vs"] = {k: {"diff": float(np.mean(ref) - np.mean(v)), "welch_p": A.welch(ref, v)}
+                               for k, v in aurc.items() if k != "clara/selector"}
     out["_curves"] = curves
     return out
 
@@ -345,16 +354,23 @@ def ablation_section(tag, runs, chosen, ds_tamper=None):
     return out
 
 
-def sweep_section(runs, chosen, pattern, key):
+def sweep_section(tag, runs, chosen, pattern, key):
+    """One hyper-parameter of CLARA varied around its default; every other value is compared with
+    the default on the same seeds (``vs_default``: value minus default)."""
     rows = {}
+    full = runs[chosen["clara"]]
     for n, seeds in runs.items():
         m = re.match(pattern, n)
         if m:
-            rows[m.group(1)] = {"test": ms(r["metrics"]["test"]["macf1"] for r in seeds.values()),
-                                "val": ms(r["metrics"]["val"]["macf1"] for r in seeds.values())}
+            row = {"test": ms(r["metrics"]["test"]["macf1"] for r in seeds.values()),
+                   "val": ms(r["metrics"]["val"]["macf1"] for r in seeds.values())}
+            common = sorted(set(seeds) & set(full))
+            if common:
+                row["vs_default"] = A.compare(tag, {s: seeds[s] for s in common}, n,
+                                              {s: full[s] for s in common}, chosen["clara"])
+            rows[m.group(1)] = row
     if not rows:
         raise Missing("no runs matching " + pattern)
-    full = runs[chosen["clara"]]
     default = str(next(iter(full.values()))["config"]["model"][key])
     seeds3 = {s: r for s, r in full.items() if s in (1, 2, 3)} or full
     rows[default] = {"test": ms(r["metrics"]["test"]["macf1"] for r in seeds3.values()),
@@ -362,14 +378,26 @@ def sweep_section(runs, chosen, pattern, key):
     return rows
 
 
+LODO_BASES = ("bert", "bert_zs", "arg", "clara")
+
+
+def _lodo_preds(D, llm, dom, name):
+    tag = "{}.{}-holdout-{}".format(D, llm, dom)
+    runs = load_runs(tag).get(name, {})
+    return [load_preds(tag, name, s) for s in sorted(runs)]
+
+
 def lodo_section(D, llm, chosen):
-    out = {}
+    """Leave-one-domain-out: per-domain macro-F1, the macro average over domains, and for every
+    method the difference of that average to BERT with (i) a bootstrap over test items stratified
+    by domain and (ii) a Welch test over the per-seed macro averages."""
+    out, per_seed = {}, {b: {} for b in LODO_BASES}
     for dom in DOMAINS:
         runs = load_runs("{}.{}-holdout-{}".format(D, llm, dom))
         if not runs:
             continue
         row = {}
-        for base in ("bert", "bert_zs", "arg", "clara"):
+        for base in LODO_BASES:
             name = chosen.get(base)
             if name in runs:
                 seeds = runs[name]
@@ -377,12 +405,42 @@ def lodo_section(D, llm, chosen):
                 row[base]["auc"] = float(np.mean([r["metrics"]["test"]["auc"] for r in seeds.values()]))
                 row["_n_test"] = next(iter(seeds.values()))["n_items"]["test"]
                 row["_n_train"] = next(iter(seeds.values()))["n_items"]["train"]
+                for s_, r in seeds.items():
+                    per_seed[base].setdefault(s_, []).append(r["metrics"]["test"]["macf1"])
         if row:
             out[dom] = row
     if not out:
         raise Missing("no leave-one-domain-out runs")
-    bases = [b for b in ("bert", "bert_zs", "arg", "clara") if all(b in r for r in out.values())]
-    out["_macro_avg"] = {b: float(np.mean([out[d][b]["mean"] for d in out if not d.startswith("_")])) for b in bases}
+    doms = [d for d in out if not d.startswith("_")]
+    bases = [b for b in LODO_BASES if all(b in out[d] for d in doms)]
+    out["_macro_avg"] = {b: float(np.mean([out[d][b]["mean"] for d in doms])) for b in bases}
+    out["_n_domains"] = len(doms)
+    out["_best_count"] = {b: int(sum(max(bases, key=lambda x: out[d][x]["mean"]) == b for d in doms)) for b in bases}
+    # tests of differences between macro averages: A minus B
+    def test(a_, b_, seed=0):
+        rng = np.random.RandomState(seed)
+        diffs, ok = np.zeros(5000), True
+        for dom in doms:
+            pa, pb = _lodo_preds(D, llm, dom, chosen[a_]), _lodo_preds(D, llm, dom, chosen[b_])
+            if not pa or not pb or any(p is None for p in pa + pb):
+                ok = False
+                break
+            y = pa[0]["test/label"]
+            idx = rng.randint(0, len(y), size=(5000, len(y)))
+            fa = np.mean([A._macf1_rows(y[idx], (p["test/prob"] >= 0.5)[idx]) for p in pa], axis=0)
+            fb = np.mean([A._macf1_rows(y[idx], (p["test/prob"] >= 0.5)[idx]) for p in pb], axis=0)
+            diffs += (fa - fb) / len(doms)
+        sa = [float(np.mean(v)) for v in per_seed[a_].values() if len(v) == len(doms)]
+        sb = [float(np.mean(v)) for v in per_seed[b_].values() if len(v) == len(doms)]
+        row = {"diff_mean": out["_macro_avg"][a_] - out["_macro_avg"][b_], "welch_p": A.welch(sa, sb)}
+        if ok:
+            row["bootstrap"] = {"ci_lo": float(np.percentile(diffs, 2.5)), "ci_hi": float(np.percentile(diffs, 97.5)),
+                                "p": float(min(1.0, 2 * min((diffs <= 0).mean(), (diffs >= 0).mean())))}
+        return row
+
+    out["_vs_bert"] = {b_: test(b_, "bert") for b_ in bases if b_ != "bert"}
+    if "bert_zs" in bases:
+        out["_vs_bert_zs"] = {b_: test(b_, "bert_zs") for b_ in bases if b_ not in ("bert", "bert_zs")}
     return out
 
 
@@ -408,26 +466,97 @@ def live_section(D, llm, runs, chosen):
     return out
 
 
-def official_arg_section(D, runs, res):
+def fp32_section(D, llm, runs, chosen):
+    """Protocol check for the main comparison: the selected configuration of every SLM-side method
+    trained without mixed precision (cached hidden states, full precision in the trainable
+    layers), same seeds.  Reports, per method, mixed precision vs full precision, and the
+    comparisons of CLARA against the other methods under full precision."""
+    tag, tag32 = "{}.{}".format(D, llm), "{}.{}-fp32".format(D, llm)
+    r32 = load_runs(tag32)
+    out = {"methods": {}, "clara_vs": {}}
+    for base in ("bert", "bert_zs", "arg", "factguard", "clara"):
+        name = chosen.get(base)
+        if name not in r32:
+            continue
+        seeds = sorted(set(r32[name]) & set(runs[name]))
+        a = {s_: runs[name][s_] for s_ in seeds}          # mixed precision (protocol of the paper)
+        b = {s_: r32[name][s_] for s_ in seeds}           # full precision
+        row = {"amp": ms(r["metrics"]["test"]["macf1"] for r in a.values()),
+               "fp32": ms(r["metrics"]["test"]["macf1"] for r in b.values()),
+               "amp_val": ms(r["metrics"]["val"]["macf1"] for r in a.values()),
+               "fp32_val": ms(r["metrics"]["val"]["macf1"] for r in b.values()),
+               "amp_seconds": float(np.mean([r["seconds"] for r in a.values()])),
+               "fp32_seconds": float(np.mean([r["seconds"] for r in b.values()]))}
+        fa = [r["metrics"]["test"]["macf1"] for r in a.values()]
+        fb = [r["metrics"]["test"]["macf1"] for r in b.values()]
+        row["diff"] = float(np.mean(fb) - np.mean(fa))
+        row["welch_p"] = A.welch(fb, fa)
+        # seed by seed: a small value means the two precisions follow the same trajectory
+        row["abs_diff_mean"] = float(np.mean(np.abs(np.array(fb) - np.array(fa))))
+        row["abs_diff_max"] = float(np.max(np.abs(np.array(fb) - np.array(fa))))
+        row["same_best_epoch"] = int(sum(a[s_]["summary"]["best_epoch"] == b[s_]["summary"]["best_epoch"] for s_ in seeds))
+        pa = [load_preds(tag, name, s_) for s_ in seeds]
+        pb = [load_preds(tag32, name, s_) for s_ in seeds]
+        if all(p is not None for p in pa + pb):
+            assert all(np.array_equal(p["test/id"], pa[0]["test/id"]) for p in pa + pb)
+            row["bootstrap"] = A.paired_bootstrap(pa[0]["test/label"], [p["test/prob"] for p in pb], [p["test/prob"] for p in pa])
+        out["methods"][base] = row
+    if "clara" not in out["methods"]:
+        raise Missing("no full-precision runs of the main configurations")
+    for base in ("bert", "bert_zs", "arg", "factguard"):
+        if base in out["methods"]:
+            ra, rb = r32[chosen["clara"]], r32[chosen[base]]
+            common = sorted(set(ra) & set(rb))
+            out["clara_vs"][base] = A.compare(tag32, {s_: ra[s_] for s_ in common}, chosen["clara"],
+                                              {s_: rb[s_] for s_ in common}, chosen[base])
+            for key in ("noise100", "unit100"):
+                if all(key in r["metrics"] for r in list(ra.values()) + list(rb.values())):
+                    out["clara_vs"][base + "_" + key] = A.compare(
+                        tag32, {s_: ra[s_] for s_ in common}, chosen["clara"], {s_: rb[s_] for s_ in common}, chosen[base], split=key)
+    for base, row in out["methods"].items():
+        name = chosen[base]
+        for key in ("noise100", "unit100"):
+            if all(key in r["metrics"] for r in r32[name].values()):
+                row["fp32_" + key] = ms(r["metrics"][key]["macf1"] for r in r32[name].values())
+    return out
+
+
+def official_arg_section(D, llm, runs, res):
     """Test macro-F1 of the official ARG code next to our re-implementation with the same inputs
-    (released GPT-3.5 rationales, learning rate of the official script)."""
+    (released GPT-3.5 rationales, learning rate of the official script), under the three training
+    protocols: cached + mixed precision, cached + full precision, frozen layers recomputed."""
     path = os.path.join(ROOT, "results", "official_arg.json")
     if D != "ARG-CN" or not os.path.exists(path):
         raise Missing("no official ARG runs for " + D)
+    name = "arg_gpt@lr2e-05"
+    tag, tag32, tag_live = "{}.{}".format(D, llm), "{}.{}-fp32".format(D, llm), "{}.{}-live".format(D, llm)
     off = json.load(open(path, encoding="utf-8"))["runs"]
     vals = [v["macf1"] for v in off.values()]
     out = {"s" + k: v["macf1"] for k, v in off.items()}
-    out.update({"n": len(vals), "mean": float(np.mean(vals)), "spread": float(max(vals) - min(vals))})
-    ours = runs.get("arg_gpt@lr2e-05")
-    if ours:
-        out["ours_cached"] = ms(r["metrics"]["test"]["macf1"] for r in ours.values())
-        out["gap_cached"] = out["mean"] - out["ours_cached"]["mean"]
-    live = res.get("live", {}).get("arg_gpt@lr2e-05")
+    out.update({"n": len(vals), "mean": float(np.mean(vals)), "std": float(np.std(vals, ddof=1)),
+                "spread": float(max(vals) - min(vals))})
+
+    def against(key, seeds):
+        f = [r["metrics"]["test"]["macf1"] for r in seeds.values()]
+        out["ours_" + key] = ms(f)
+        out["gap_" + key] = out["mean"] - float(np.mean(f))
+        out["welch_" + key] = A.welch(vals, f)
+        return f
+
+    cached = against("cached", runs[name]) if runs.get(name) else None
+    r32 = load_runs(tag32).get(name)
+    full = against("fp32", r32) if r32 else None
+    live = load_runs(tag_live).get(name)
     if live:
-        out["ours_live"] = live["live"]
-        out["gap_live"] = out["mean"] - live["live"]["mean"]
-        if "fp32" in live:
-            out["ours_fp32"] = live["fp32"]
+        against("live", live)
+    if cached and full:                      # mixed vs full precision of our own implementation
+        common = sorted(set(runs[name]) & set(r32))
+        out["amp_vs_fp32"] = {"n": len(common),
+                              "diff": float(np.mean([r32[s]["metrics"]["test"]["macf1"] - runs[name][s]["metrics"]["test"]["macf1"] for s in common])),
+                              "welch_p": A.welch(full, cached)}
+        pa, pb = [load_preds(tag, name, s) for s in common], [load_preds(tag32, name, s) for s in common]
+        if common and all(p is not None for p in pa + pb):
+            out["amp_vs_fp32"]["bootstrap"] = A.paired_bootstrap(pa[0]["test/label"], [p["test/prob"] for p in pb], [p["test/prob"] for p in pa])
     return out
 
 
@@ -531,7 +660,7 @@ def distill_section(tag, runs, chosen):
     return out
 
 
-def llm2_section(D, chosen, tag2, runs1):
+def llm2_section(D, chosen, tag2, runs1, ds1=None, tag1=None):
     """The LLM-dependent methods with a second analyst LLM, at the learning rates selected with
     the first one (seeds 1-3; the first-LLM numbers are restricted to the same seeds)."""
     runs2 = load_runs("{}.{}".format(D, tag2))
@@ -548,12 +677,23 @@ def llm2_section(D, chosen, tag2, runs1):
             for key in ("noise100", "unit100"):
                 if all(key in r["metrics"] for r in seeds.values()):
                     out[base]["second_" + key] = ms(r["metrics"][key]["macf1"] for r in seeds.values())
+                if first and all(key in r["metrics"] for r in first.values()):
+                    out[base]["first_" + key] = ms(r["metrics"][key]["macf1"] for r in first.values())
     path = os.path.join(ROOT, "results", "llm_only", "{}.{}.json".format(D, tag2))
     if os.path.exists(path):
         rows = json.load(open(path, encoding="utf-8"))["rows"]
         out["zero_shot"] = rows["zero-shot"]["test"]["macf1"]
         if "zero-shot, soft P(fake) @0.5" in rows:
             out["zero_shot_auc"] = rows["zero-shot, soft P(fake) @0.5"]["test"]["auc"]
+    # does the relevance gate behave the same with the second LLM?  (same seeds for both LLMs)
+    name = chosen.get("clara")
+    ds_path = os.path.join(ROOT, "outputs", "datasets", "{}.{}.json".format(D, tag2))
+    if name in runs2 and os.path.exists(ds_path):
+        ds2 = Dataset.load(ds_path)
+        out["relevance_second"] = A.relevance_under_noise(ds2, "{}.{}".format(D, tag2), name, runs2[name], ds2.lang)
+        if ds1 is not None:
+            same = {s_: r for s_, r in runs1[name].items() if s_ in runs2[name]}
+            out["relevance_first"] = A.relevance_under_noise(ds1, tag1, name, same, ds1.lang)
     return out
 
 
@@ -597,11 +737,22 @@ def derived_section(res):
     put("clara_minus_lora_same_seeds", lambda: sig["lora"]["diff_mean"])
     put("argswap_minus_clara_item100", lambda: -nsig["noise100/arg_swap"]["diff_mean"])
     put("arg_minus_clara_item100", lambda: -nsig["noise100/arg"]["diff_mean"])
+    put("lora_val_minus_clara_val", lambda: main["lora"]["val_macf1"] - main["clara"]["val_macf1"])
+    for b in ("bert_tc", "bert_claims"):
+        put(b + "_minus_bert", lambda b=b: main[b]["macf1"] - bert())
+        put("bert_minus_" + b, lambda b=b: bert() - main[b]["macf1"])
+    put("lodo_clara_minus_bert_zs", lambda: res["lodo"]["_macro_avg"]["bert_zs"] - res["lodo"]["_macro_avg"]["clara"])
+    lodo = res.get("lodo", {})
+    for b in ("bert_zs", "arg", "clara"):
+        put("lodo_" + b + "_minus_bert", lambda b=b: lodo["_macro_avg"][b] - lodo["_macro_avg"]["bert"])
     style = res.get("style", {})
     for b in ("lora", "clara", "bert", "arg", "factguard", "bert_zs"):
         put(b + "_style_drop", lambda b=b: -style[b]["delta"]["mean"])
     sel = res.get("selective", {})
     put("selector_aurc_gain", lambda: sel["clara"]["maxprob"]["aurc"] - sel["clara"]["selector"]["aurc"])
+    fp = res.get("fp32", {}).get("methods", {})
+    for b in ("bert", "bert_zs", "arg", "factguard", "clara"):
+        put(b + "_amp_minus_fp32", lambda b=b: -fp[b]["diff"])
     if not out:
         raise Missing("nothing to derive")
     return out
@@ -682,17 +833,18 @@ def main():
         section("selective", lambda: selective_section(tag, runs, chosen))
         section("ablation", lambda: ablation_section(tag, runs, chosen))
         section("style_llm", lambda: style_llm_section(ds, load_extra("style")))
-        section("claims_k", lambda: sweep_section(runs, chosen, r"clara-k(\d+)$", "max_claims"))
-        section("swap_rate", lambda: sweep_section(runs, chosen, r"clara-swap([\d.]+)$", "swap_rate"))
-        section("lambda_rel", lambda: sweep_section(runs, chosen, r"clara-lrel([\d.]+)$", "lambda_rel"))
-        section("lambda_mil", lambda: sweep_section(runs, chosen, r"clara-lmil([\d.]+)$", "lambda_mil"))
-        section("lambda_gate", lambda: sweep_section(runs, chosen, r"clara-lgate([\d.]+)$", "lambda_gate"))
+        section("claims_k", lambda: sweep_section(tag, runs, chosen, r"clara-k(\d+)$", "max_claims"))
+        section("swap_rate", lambda: sweep_section(tag, runs, chosen, r"clara-swap([\d.]+)$", "swap_rate"))
+        section("lambda_rel", lambda: sweep_section(tag, runs, chosen, r"clara-lrel([\d.]+)$", "lambda_rel"))
+        section("lambda_mil", lambda: sweep_section(tag, runs, chosen, r"clara-lmil([\d.]+)$", "lambda_mil"))
+        section("lambda_gate", lambda: sweep_section(tag, runs, chosen, r"clara-lgate([\d.]+)$", "lambda_gate"))
         section("lodo", lambda: lodo_section(D, args.llm, chosen))
         section("live", lambda: live_section(D, args.llm, runs, chosen))
-        section("official_arg", lambda: official_arg_section(D, runs, res))
+        section("fp32", lambda: fp32_section(D, args.llm, runs, chosen))
+        section("official_arg", lambda: official_arg_section(D, args.llm, runs, res))
         section("cross", lambda: cross_section(D, args.llm, ds, load_extra("tamper"), chosen))
         section("distill", lambda: distill_section(tag, runs, chosen))
-        section("llm2", lambda: llm2_section(D, chosen, args.llm2, runs))
+        section("llm2", lambda: llm2_section(D, chosen, args.llm2, runs, ds, tag))
         section("derived", lambda: derived_section(res))
 
     os.makedirs(os.path.dirname(args.out), exist_ok=True)

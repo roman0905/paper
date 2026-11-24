@@ -479,7 +479,8 @@ def tamper_detection(ds_tamper: Dataset, tag: str, name: str, runs: Runs) -> Dic
 # selective prediction
 # --------------------------------------------------------------------------------------
 
-def selective_summary(tag: str, name: str, runs: Runs) -> Dict[str, Dict[str, float]]:
+def selective_per_seed(tag: str, name: str, runs: Runs) -> Dict[str, Dict[str, List[float]]]:
+    """Selective-prediction metrics of every seed: {confidence kind: {metric: [value per seed]}}."""
     acc: Dict[str, Dict[str, List[float]]] = {}
     for seed in sorted(runs):
         pred = load_preds(tag, name, seed)
@@ -488,7 +489,13 @@ def selective_summary(tag: str, name: str, runs: Runs) -> Dict[str, Dict[str, fl
         for kind, m in selective.evaluate(pred).items():
             for k, v in m.items():
                 acc.setdefault(kind, {}).setdefault(k, []).append(v)
-    return {kind: {k: float(np.mean(v)) for k, v in d.items()} for kind, d in acc.items()}
+    return acc
+
+
+def selective_summary(tag: str, name: str, runs: Runs) -> Dict[str, Dict[str, float]]:
+    """Seed means of :func:`selective_per_seed`."""
+    return {kind: {k: float(np.mean(v)) for k, v in d.items()}
+            for kind, d in selective_per_seed(tag, name, runs).items()}
 
 
 def risk_coverage_curve(tag: str, name: str, runs: Runs, kind: str = "maxprob",

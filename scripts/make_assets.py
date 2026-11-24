@@ -43,6 +43,14 @@ def pct(x, d=2):
     return "{:.{d}f}".format(100 * x, d=d)
 
 
+def signed(x, d=2):
+    """Signed number for a table cell or running text: a real minus sign, and never '-0.00'."""
+    s = "{:+.{d}f}".format(x, d=d)
+    if float(s) == 0:
+        return s[1:]
+    return s.replace("-", "$-$")
+
+
 def pm(ms, d=2, bold=False):
     core = pct(ms["mean"], d)
     if bold:
@@ -300,7 +308,7 @@ def tab_style(A):
                 cells += ["--"] * 3
             else:
                 cells += [pm(r["orig"]), pm(r["style"], bold=abs(r["style"]["mean"] - best[D]) < 1e-12),
-                          "{:+.2f}".format(100 * r["delta"]["mean"])]
+                          signed(100 * r["delta"]["mean"])]
         if any(c != "--" for c in cells):
             if b == "bert_tc":
                 out.append(r"\midrule")
@@ -393,7 +401,16 @@ def tab_lodo(A):
         out.append("{} & {:,} & {:,} & ".format(d, L[d]["_n_train"], L[d]["_n_test"]) + " & ".join(cells) + r" \\")
     out.append(r"\midrule")
     avg = L["_macro_avg"]
-    out.append("平均 & & & " + " & ".join(pct(avg[b]) if b in avg else "--" for b in bases) + r" \\")
+    best = max(avg.values())
+    cells = []
+    for b in bases:
+        c = pct(avg[b]) if b in avg else "--"
+        if b in avg and abs(avg[b] - best) < 1e-12:
+            c = r"\textbf{" + c + "}"
+        if both_sig(L["_vs_bert"].get(b)):
+            c += "$^{*}$"
+        cells.append(c)
+    out.append("各领域平均 & & & " + " & ".join(cells) + r" \\")
     out += [r"\bottomrule", r"\end{tabular}"]
     return "\n".join(out) + "\n"
 
@@ -438,18 +455,30 @@ def tab_distill(A):
 
 
 def tab_llm2(A):
+    """The LLM-dependent methods with two analyst LLMs (same three seeds), clean and with every
+    analysis replaced."""
     order = ["bert_zs", "arg", "factguard", "clara"]
-    out = [r"\begin{tabular}{lcccc}", r"\toprule",
-           r" & \multicolumn{2}{c}{" + DS_LABEL["ARG-CN"] + r"} & \multicolumn{2}{c}{" + DS_LABEL["ARG-EN"] + r"} \\",
-           r"\cmidrule(lr){2-3}\cmidrule(lr){4-5}", r"方法 & Qwen2.5-7B & Qwen3-8B & Qwen2.5-7B & Qwen3-8B \\", r"\midrule"]
-    out.append("零样本判断（不训练） & " + " & ".join(
-        "{} & {}".format(pct(A[D]["llm_only"]["zero-shot"]["test"]["macf1"]),
-                         pct(A[D]["llm2"]["zero_shot"]) if "zero_shot" in A[D]["llm2"] else "--") for D in DS) + r" \\")
+    out = [r"\begin{tabular}{lcccccccc}", r"\toprule",
+           r" & \multicolumn{4}{c}{" + DS_LABEL["ARG-CN"] + r"} & \multicolumn{4}{c}{" + DS_LABEL["ARG-EN"] + r"} \\",
+           r"\cmidrule(lr){2-5}\cmidrule(lr){6-9}",
+           r" & \multicolumn{2}{c}{原始} & \multicolumn{2}{c}{整条替换} & \multicolumn{2}{c}{原始} & \multicolumn{2}{c}{整条替换} \\",
+           r"\cmidrule(lr){2-3}\cmidrule(lr){4-5}\cmidrule(lr){6-7}\cmidrule(lr){8-9}",
+           r"方法 & Qwen2.5 & Qwen3 & Qwen2.5 & Qwen3 & Qwen2.5 & Qwen3 & Qwen2.5 & Qwen3 \\", r"\midrule"]
+    cells = []
+    for D in DS:
+        cells += [pct(A[D]["llm_only"]["zero-shot"]["test"]["macf1"]), pct(A[D]["llm2"]["zero_shot"]), "--", "--"]
+    out.append("零样本判断（不训练） & " + " & ".join(cells) + r" \\")
+    out.append(r"\midrule")
     for b in order:
         cells = []
         for D in DS:
             r = A[D]["llm2"].get(b)
-            cells += [pm(r["first"]), pm(r["second"])] if r else ["--", "--"]
+            if r is None:
+                cells += ["--"] * 4
+                continue
+            cells += [pm(r["first"]), pm(r["second"]),
+                      pct(r["first_noise100"]["mean"]) if "first_noise100" in r else "--",
+                      pct(r["second_noise100"]["mean"]) if "second_noise100" in r else "--"]
         out.append(NAME[b] + " & " + " & ".join(cells) + r" \\")
     out += [r"\bottomrule", r"\end{tabular}"]
     return "\n".join(out) + "\n"
@@ -543,7 +572,7 @@ def tab_sig(A):
         if cmp is None or "bootstrap" not in cmp:
             return ["--"] * 4
         bs = cmp["bootstrap"]
-        return ["{:+.2f}".format(100 * cmp["diff_mean"]), "[{:+.2f}, {:+.2f}]".format(100 * bs["ci_lo"], 100 * bs["ci_hi"]),
+        return [signed(100 * cmp["diff_mean"]), "[{}, {}]".format(signed(100 * bs["ci_lo"]), signed(100 * bs["ci_hi"])),
                 fmt_p(bs["p"]), fmt_p(cmp.get("welch_p", float("nan")))]
 
     out = [r"\begin{tabular}{lcccccccc}", r"\toprule",
@@ -564,6 +593,60 @@ def tab_sig(A):
         if body:
             out += [r"\midrule", r"\multicolumn{9}{l}{\emph{" + title + r"}} \\"] + body
     out += [r"\bottomrule", r"\end{tabular}"]
+    return "\n".join(out) + "\n"
+
+
+def tab_fp32(A):
+    """Main configurations with and without mixed precision (same seeds)."""
+    order = ["bert", "bert_zs", "arg", "factguard", "clara"]
+    out = [r"\begin{tabular}{lcccccccc}", r"\toprule",
+           r" & \multicolumn{4}{c}{" + DS_LABEL["ARG-CN"] + r"} & \multicolumn{4}{c}{" + DS_LABEL["ARG-EN"] + r"} \\",
+           r"\cmidrule(lr){2-5}\cmidrule(lr){6-9}",
+           r"方法 & 混合精度 & 全精度 & $p_{\text{样本}}$ & $p_{\text{种子}}$ & 混合精度 & 全精度 & $p_{\text{样本}}$ & $p_{\text{种子}}$ \\", r"\midrule"]
+    for b in order:
+        cells = []
+        for D in DS:
+            r = A[D].get("fp32", {}).get("methods", {}).get(b)
+            if r is None:
+                cells += ["--"] * 4
+            else:
+                cells += [pm(r["amp"]), pm(r["fp32"]), fmt_p(r["bootstrap"]["p"]) if "bootstrap" in r else "--", fmt_p(r["welch_p"])]
+        out.append(NAME[b] + " & " + " & ".join(cells) + r" \\")
+    out += [r"\bottomrule", r"\end{tabular}"]
+    if not any("fp32" in A[D] for D in DS):
+        raise KeyError("fp32")
+    return "\n".join(out) + "\n"
+
+
+def tab_fp32_sig(A):
+    """CLARA minus each method under mixed precision (the protocol of the paper) and under full
+    precision: does the precision of the trainable layers change any comparison?"""
+    def cells_for(cmp):
+        if cmp is None or "bootstrap" not in cmp:
+            return ["--"] * 3
+        return [signed(100 * cmp["diff_mean"]), fmt_p(cmp["bootstrap"]["p"]), fmt_p(cmp.get("welch_p", float("nan")))]
+
+    sub = r"$\Delta$ & $p_{\text{样本}}$ & $p_{\text{种子}}$"
+    out = [r"\begin{tabular}{l" + "c" * 12 + "}", r"\toprule",
+           r" & \multicolumn{6}{c}{" + DS_LABEL["ARG-CN"] + r"} & \multicolumn{6}{c}{" + DS_LABEL["ARG-EN"] + r"} \\",
+           r"\cmidrule(lr){2-7}\cmidrule(lr){8-13}",
+           r" & \multicolumn{3}{c}{混合精度} & \multicolumn{3}{c}{全精度} & \multicolumn{3}{c}{混合精度} & \multicolumn{3}{c}{全精度} \\",
+           r"\cmidrule(lr){2-4}\cmidrule(lr){5-7}\cmidrule(lr){8-10}\cmidrule(lr){11-13}",
+           r"\method{} 对比 & " + " & ".join([sub] * 4) + r" \\"]
+    blocks = [("原始测试集", ["bert", "bert_zs", "arg", "factguard"], lambda D, b: A[D].get("significance", {}).get(b), "{}"),
+              ("全部分析被整条替换", ["arg"], lambda D, b: A[D].get("noise_sig", {}).get("noise100/" + b), "{}_noise100"),
+              ("全部声明/理由句被逐个替换", ["arg"], lambda D, b: A[D].get("noise_sig", {}).get("unit100/" + b), "{}_unit100")]
+    for title, bases, amp, key in blocks:
+        body = []
+        for b in bases:
+            cells = []
+            for D in DS:
+                cells += cells_for(amp(D, b)) + cells_for(A[D].get("fp32", {}).get("clara_vs", {}).get(key.format(b)))
+            body.append(NAME[b] + " & " + " & ".join(cells) + r" \\")
+        out += [r"\midrule", r"\multicolumn{13}{l}{\emph{" + title + r"}} \\"] + body
+    out += [r"\bottomrule", r"\end{tabular}"]
+    if not any("fp32" in A[D] for D in DS):
+        raise KeyError("fp32")
     return "\n".join(out) + "\n"
 
 
@@ -647,7 +730,7 @@ def tab_cases(A):
     cases = A["ARG-CN"]["cases"]
     out = []
     for n, c in enumerate(cases, 1):
-        out.append(r"\noindent\textbf{样例 %d}（篡改类型：%s；\method{} 预测 $\hat y=%.2f$）\par" % (
+        out.append(r"\noindent\textbf{样例 %d}（篡改类型：%s；\method{} 预测 $\hat y=%.3f$）\par" % (
             n, {"negation": "否定", "number": "数字", "time": "时间", "entity": "实体", "outcome": "结果/程度"}[c["change_type"]], c["prob"]))
         out.append(r"{\small\begin{quote}")
         for j, sent in enumerate(c["sents"]):
@@ -656,16 +739,16 @@ def tab_cases(A):
                 t = r"\textbf{〔被篡改〕}" + t + r"\quad\textbf{〔原句〕}" + esc(c["orig_sentence"])
             out.append("[%d] %s\\par" % (j + 1, t))
         out.append(r"\end{quote}}")
-        out.append(r"{\small\begin{tabularx}{\linewidth}{@{}clXccc@{}}")
+        out.append(r"{\small\begin{tabularx}{\linewidth}{@{}clXcccc@{}}")
         out.append(r"\toprule")
-        out.append(r"句 & 类型 & 声明与两方论证 & $v_k$ & $g_k$ & $p_k$ \\")
+        out.append(r"句 & 类型 & 声明与两方论证 & $v_k$ & $r_k$ & $g_k$ & $p_k$ \\")
         out.append(r"\midrule")
         for r in c["instances"]:
             body = r"\textbf{" + esc(r["claim"]) + "}"
             if r["support"] or r["refute"]:
                 body += r"\newline $+$ " + esc(r["support"]) + r"\newline $-$ " + esc(r["refute"])
             sent = "--" if r["type"] == "overall" else str(r["sent"] + 1)
-            out.append("%s & %s & %s & %.2f & %.2f & %.2f \\\\" % (sent, TYPE_ZH[r["type"]], body, r["v"], r["g"], r["p"]))
+            out.append("%s & %s & %s & %.2f & %.2f & %.2f & %.3f \\\\" % (sent, TYPE_ZH[r["type"]], body, r["v"], r.get("r", float("nan")), r["g"], r["p"]))
         out.append(r"\bottomrule")
         out.append(r"\end{tabularx}}")
         out.append(r"\par\medskip")
@@ -777,11 +860,13 @@ def fig_sensitivity(A, path):
     from clara import plotting as P
 
     P.setup()
-    panels = [(D, "claims_k", "声明数上限 $K$（" + SHORT[D] + "）") for D in DS if "claims_k" in A[D]]
-    for key, label in (("swap_rate", r"错配负例比例 $\rho$"), ("lambda_rel", r"$\lambda_{\mathrm{rel}}$"),
+    # NB: a label must not mix CJK text with mathtext - the mathtext parser has no CJK fallback font
+    DSN = {"ARG-CN": "Weibo21", "ARG-EN": "GossipCop"}
+    panels = [(D, "claims_k", "声明数上限 K") for D in DS if "claims_k" in A[D]]
+    for key, label in (("swap_rate", "错配负例比例 ρ"), ("lambda_rel", r"$\lambda_{\mathrm{rel}}$"),
                        ("lambda_mil", r"$\lambda_{\mathrm{mil}}$"), ("lambda_gate", r"$\lambda_{\mathrm{gate}}$")):
         if key in A["ARG-CN"]:
-            panels.append(("ARG-CN", key, label + "（CN）"))
+            panels.append(("ARG-CN", key, label))
     if not panels:
         raise KeyError("sensitivity")
     ncol = 3
@@ -805,7 +890,8 @@ def fig_sensitivity(A, path):
             ax.annotate("BERT", (pos[-1], yb), xytext=(4, -8), textcoords="offset points", ha="right", fontsize=7.5, color=P.INK2)
         ax.set_xticks(pos)
         ax.set_xticklabels(["{:g}".format(float(x)) for x in xs])
-        ax.set_xlabel(label, fontsize=8)
+        ax.set_xlabel(label, fontsize=9)
+        ax.set_title(DSN[D], loc="left", fontsize=8.5)
         ax.margins(x=0.15, y=0.35)
     for r in range(nrow):
         axes[r][0].set_ylabel("macro-F1（%）")
@@ -846,6 +932,7 @@ def write_numbers(A):
         \\pone{CN/noise/clara/item/100/mean}   percentage, one decimal        (75.5)
         \\ptwo{...}  percentage, two decimals    \\dpone{...} / \\dptwo{...}  signed percentage
         \\fthree{...} / \\ftwo{...} / \\fone{...}  plain number    \\cnt{...}  integer with separators
+        \\peq{...}  a p-value with its relation sign ("=0.043" or "<0.001"), for use inside maths
 
     A path that does not exist prints a visible marker instead of nothing.
     """
@@ -856,14 +943,18 @@ def write_numbers(A):
              "\\newcommand{\\pone}[1]{\\num@get{pa}{#1}}", "\\newcommand{\\ptwo}[1]{\\num@get{pb}{#1}}",
              "\\newcommand{\\dpone}[1]{\\num@get{da}{#1}}", "\\newcommand{\\dptwo}[1]{\\num@get{db}{#1}}",
              "\\newcommand{\\fthree}[1]{\\num@get{fc}{#1}}", "\\newcommand{\\ftwo}[1]{\\num@get{fb}{#1}}",
-             "\\newcommand{\\fone}[1]{\\num@get{fa}{#1}}", "\\newcommand{\\cnt}[1]{\\num@get{ct}{#1}}"]
+             "\\newcommand{\\fone}[1]{\\num@get{fa}{#1}}", "\\newcommand{\\cnt}[1]{\\num@get{ct}{#1}}",
+             "\\newcommand{\\peq}[1]{\\num@get{pe}{#1}}"]
     n = 0
     for D in DS:
         for key, v in _leaves(A[D], [SHORT[D]]):
             if any(ch in _BAD for ch in key) or v != v or abs(v) == float("inf"):
                 continue
             forms = {"pa": "{:.1f}".format(100 * v), "pb": "{:.2f}".format(100 * v),
-                     "da": "{:+.1f}".format(100 * v), "db": "{:+.2f}".format(100 * v),
+                     # signed forms are for running text: a real minus sign, not a hyphen
+                     "da": signed(100 * v, 1), "db": signed(100 * v, 2),
+                     # a p-value with its relation sign, for use inside maths: $p\peq{...}$
+                     "pe": "={:.3f}".format(v) if v >= 0.001 else "<0.001",
                      "fc": "{:.3f}".format(v), "fb": "{:.2f}".format(v), "fa": "{:.1f}".format(v),
                      "ct": "{:,.0f}".format(v)}
             for tag, text in forms.items():
@@ -883,7 +974,8 @@ def main():
                      ("loc", tab_loc), ("loc_type", tab_loc_type), ("tamper", tab_tamper), ("lodo", tab_lodo),
                      ("selective", tab_selective), ("cost", tab_cost), ("train_cost", tab_train_cost),
                      ("grid", tab_grid), ("sig", tab_sig), ("live", tab_live), ("cases", tab_cases),
-                     ("llm2", tab_llm2), ("distill", tab_distill), ("cross", tab_cross)]:
+                     ("llm2", tab_llm2), ("distill", tab_distill), ("cross", tab_cross), ("fp32", tab_fp32),
+                     ("fp32_sig", tab_fp32_sig)]:
         table(name, fn, A)
     write_prompts()
     figure("noise", fig_noise, A)
