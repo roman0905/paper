@@ -3,15 +3,30 @@
   "batch_size": 16,
   "closed": true,
   "epochs": 0,
+  "ev_weight": 0.0,
+  "grad_checkpoint": false,
   "lr": 0.0001,
   "m": 16,
   "max_tokens": 1100,
+  "no_claim": false,
+  "perturb_n": 0,
+  "pool": 48,
   "rank": 16,
-  "ranker": "bm25"
+  "ranker": "bm25",
+  "select": false,
+  "swap_rate": 0.0,
+  "train_limit": 0,
+  "train_sample": false
+ },
+ "cost": {
+  "queries": 1.0,
+  "tokens": 98.535
  },
  "dataset": "RAWFC",
  "encoder": "Qwen2.5-7B-Instruct",
+ "extra": {},
  "history": [],
+ "max_memory_gb": 14.541803359985352,
  "method": "zs-closed",
  "metrics": {
   "test": {
@@ -21,6 +36,7 @@
    "f1_0": 0.5281385281385281,
    "f1_1": 0.0,
    "f1_2": 0.3564356435643564,
+   "f1_h": 0.34179158673800186,
    "macf1": 0.29485805723429487,
    "macp": 0.29970291146761735,
    "macr": 0.3976330468867782,
@@ -33,28 +49,30 @@
    "f1_0": 0.5388127853881278,
    "f1_1": 0.056338028169014086,
    "f1_2": 0.4727272727272727,
+   "f1_h": 0.46512684447256997,
    "macf1": 0.3559593620948049,
    "macp": 0.49675735927445913,
    "macr": 0.43728328056686266,
    "mae": 0.795
   }
  },
+ "n_eval": {
+  "test": 200,
+  "val": 200
+ },
  "n_items": {
   "test": 200,
+  "train": 1612,
   "val": 200
  },
  "n_trainable": 0,
  "name": "zs-closed",
  "protocol": "strict",
- "seconds": 13.783745050430298,
+ "seconds": 13.26607608795166,
  "seed": 1,
  "summary": {
   "best_epoch": -1,
   "epochs_run": 0,
   "train_seconds": 0.0
- },
- "tokens": {
-  "test": 98.535,
-  "val": 96.835
  }
 }

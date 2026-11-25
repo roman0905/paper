@@ -42,6 +42,19 @@ def standard(items: Sequence[Dict[str, Any]], ranking: Dict[str, Ranked], m: int
     return [example(it, layout(ranking.get(it["id"], [])[:m])) for it in items]
 
 
+def withhold_claim(examples: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Evidence-only control: the same queries with the claim text removed.  If a verifier does as
+    well without the claim, the evidence gives the verdict away (Hansen et al., 2021)."""
+    from openbook.prompts import NO_CLAIM
+
+    out = []
+    for ex in examples:
+        ex = dict(ex)
+        ex["claim"] = NO_CLAIM
+        out.append(ex)
+    return out
+
+
 def closed(items: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Closed-book queries: the claim alone."""
     return [example(it, None, kind="closed") for it in items]
@@ -63,6 +76,55 @@ def swapped(items: Sequence[Dict[str, Any]], ranking: Dict[str, Ranked], m: int,
     perm = derangement(len(items), seed)
     return [example(it, layout(ranking.get(items[int(perm[i])]["id"], [])[:m]), kind="swap", source=items[int(perm[i])])
             for i, it in enumerate(items)]
+
+
+# ------------------------------------------------------------------------- perturbed evidence
+# A perturbation maps (items, ranking) to (items', ranking') with the same ids, so that whatever
+# inference procedure a verifier uses can be run unchanged on the perturbed evidence pool.
+
+def with_foreign(item: Dict[str, Any], other: Dict[str, Any], ranked_own: Ranked, ranked_other: Ranked,
+                 n_own: int, n_other: int) -> Tuple[Dict[str, Any], Ranked]:
+    """A copy of ``item`` whose candidate pool holds its own best ``n_own`` sentences and the best
+    ``n_other`` sentences of another claim, interleaved by rank.  The foreign reports are appended
+    to the report list (so their report index is >= ``n_reports_own``) and carry no silver tag."""
+    off = len(item["reports"])
+    virtual = dict(item)
+    virtual["reports"] = list(item["reports"]) + [dict(r, ev=[0] * len(r["ev"])) for r in other["reports"]]
+    virtual["n_reports_own"] = off
+    own, foreign = list(ranked_own[:n_own]), [(ri + off, si, s) for ri, si, s in ranked_other[:n_other]]
+    ranked: Ranked = []
+    for i in range(max(len(own), len(foreign))):
+        ranked += own[i:i + 1] + foreign[i:i + 1]
+    return virtual, ranked
+
+
+def perturb(items: Sequence[Dict[str, Any]], ranking: Dict[str, Ranked], kind: str, m: int, top: int,
+            seed: int = 0) -> Tuple[List[Dict[str, Any]], Dict[str, Ranked]]:
+    """Test-time evidence perturbations (labels never change):
+
+    ``swap``     the whole pool comes from another claim of the split: retrieval returned material
+                 that is not about the claim
+    ``mix``      half of the pool is the claim's own, half comes from another claim
+    ``droptop``  the first-stage top-``m`` sentences are missing: weak retrieval
+    """
+    pool = max(top, m)
+    if kind == "droptop":
+        return list(items), {it["id"]: ranking.get(it["id"], [])[m:] for it in items}
+    if kind not in ("swap", "mix"):
+        raise ValueError(kind)
+    perm = derangement(len(items), seed)
+    out_items, out_rank = [], {}
+    for i, it in enumerate(items):
+        other = items[int(perm[i])]
+        n_own = 0 if kind == "swap" else pool // 2
+        v, r = with_foreign(it, other, ranking.get(it["id"], []), ranking.get(other["id"], []), n_own, pool - n_own)
+        out_items.append(v)
+        out_rank[it["id"]] = r
+    return out_items, out_rank
+
+
+def is_foreign(item: Dict[str, Any], cand: Cand) -> bool:
+    return cand[0] >= item.get("n_reports_own", len(item["reports"]))
 
 
 def sample_picks(n_ranked: int, m: int, top: int, rng: np.random.RandomState, bias: float = 8.0) -> List[int]:
@@ -105,6 +167,18 @@ def chunked(items: Sequence[Dict[str, Any]], ranking: Dict[str, Ranked], m: int,
             ex = example(it, layout(r[j::k]))
             ex["chunk"] = j
             out.append(ex)
+    return out
+
+
+def oracle(items: Sequence[Dict[str, Any]], ranking: Dict[str, Ranked], m: int, top: int) -> List[Dict[str, Any]]:
+    """Upper-bound analysis, NOT a legitimate test condition: the ``m`` sentences of the pool are
+    chosen with the silver evidence labels of the test claims (silver first, each group in
+    first-stage order)."""
+    out = []
+    for it in items:
+        r = ranking.get(it["id"], [])[:top]
+        best = sorted(r, key=lambda c: -it["reports"][c[0]]["ev"][c[1]])[:m]       # stable: keeps the rank order
+        out.append(example(it, layout(best), kind="oracle"))
     return out
 
 

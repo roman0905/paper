@@ -14,7 +14,10 @@ def classification_metrics(y_true: Sequence[int], prob: np.ndarray) -> Dict[str,
     n_classes = prob.shape[1]
     pred = prob.argmax(1)
     p, r, f, _ = precision_recall_fscore_support(y, pred, labels=list(range(n_classes)), zero_division=0)
-    out = {"macf1": float(f.mean()), "macp": float(p.mean()), "macr": float(r.mean()),
+    mp, mr = float(p.mean()), float(r.mean())
+    out = {"macf1": float(f.mean()), "macp": mp, "macr": mr,
+           # several papers on these datasets report F1 = 2PR/(P+R) of the macro-averaged P and R
+           "f1_h": 2.0 * mp * mr / (mp + mr) if mp + mr > 0 else 0.0,
            "acc": float((pred == y).mean()), "mae": float(np.abs(pred - y).mean())}
     for c in range(n_classes):
         out["f1_%d" % c] = float(f[c])

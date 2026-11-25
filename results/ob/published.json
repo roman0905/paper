@@ -1,0 +1,42 @@
+{
+ "_note": "Numbers that other papers report for their own method on RAWFC (3 classes) and LIAR-RAW (6 classes), in percent: [macro-P, macro-R, F1]. Collected in Nov. 2026 from the papers' result tables; 'checked' says how: 'table' = the row was read in the paper itself, 'secondhand' = copied from another paper's table. 'f1' is 'macro' (mean of per-class F1) or 'H' (harmonic mean of macro-P and macro-R, as stated by the paper or as implied by its numbers). Entries whose evidence is not the datasets' raw reports are kept for reference but are not comparable.",
+ "methods": [
+  {"key": "yang2022cofced", "name": "CofCED", "year": 2022, "rawfc": [52.99, 50.99, 51.07], "liar": [29.48, 29.55, 28.93],
+   "backbone": "DistilBERT", "llm": false, "trained": true, "evidence": "reports", "f1": "macro", "checked": "table"},
+  {"key": "wang2024ldefense", "name": "L-Defense", "year": 2024, "rawfc": [61.72, 61.01, 61.20], "liar": [30.55, 32.20, 30.53],
+   "backbone": "GPT-3.5 + RoBERTa-large", "llm": true, "trained": true, "evidence": "reports", "f1": "macro", "checked": "table",
+   "note": "ChatGPT variant"},
+  {"key": "zhang2024ffrr", "name": "FFRR", "year": 2024, "rawfc": [56.5, 57.4, 57.0], "liar": [34.5, 32.6, 33.5],
+   "backbone": "GPT-3.5 (text-davinci-003)", "llm": true, "trained": false, "evidence": "reports, detected leaks removed", "f1": "H", "checked": "table"},
+  {"key": "wang2025eexpfnd", "name": "EExpFND", "year": 2025, "rawfc": [54.43, 53.49, 53.61], "liar": [29.91, 29.93, 29.58],
+   "backbone": "RoBERTa + BART", "llm": false, "trained": true, "evidence": "reports", "f1": "macro", "checked": "table"},
+  {"key": "qazi2025derec", "name": "DeReC", "year": 2025, "rawfc": [65.58, 64.56, 64.60], "liar": [35.94, 32.24, 33.13],
+   "backbone": "DeBERTa-v3-large", "llm": false, "trained": true, "evidence": "reports", "f1": "macro", "checked": "table",
+   "note": "single run; the same authors report 55.6-57.4 / 26.6-27.1 (5 seeds) with DeBERTa-v3-base"},
+  {"key": "nguyen2025facets", "name": "FACETS", "year": 2025, "rawfc": [69.76, 70.04, 69.51], "liar": [34.91, 38.50, 34.64],
+   "backbone": "GPT-3.5 + RoBERTa", "llm": true, "trained": true, "evidence": "reports", "f1": "macro", "checked": "table"},
+  {"key": "xiong2025delphiagent", "name": "DelphiAgent", "year": 2025, "rawfc": [68.05, 68.03, 68.04], "liar": [31.33, 28.36, 28.36],
+   "backbone": "GPT-4o", "llm": true, "trained": false, "evidence": "reports", "f1": "macro", "checked": "secondhand"},
+  {"key": "wang2026gdefense", "name": "G-Defense", "year": 2026, "rawfc": [64.99, 64.52, 64.31], "liar": [33.09, 31.55, 31.55],
+   "backbone": "GPT-3.5 + Flan-T5-large", "llm": true, "trained": true, "evidence": "reports", "f1": "macro", "checked": "table",
+   "note": "mean of 3 runs"},
+  {"key": "lourenco2026kgcraft", "name": "KG-CRAFT", "year": 2026, "rawfc": [81.63, 81.53, 81.58], "liar": [77.38, 70.67, 73.87],
+   "backbone": "Llama-3.3-70B", "llm": true, "trained": false, "evidence": "reports", "f1": "H", "checked": "table",
+   "note": "far above every other reported result; not reproduced elsewhere"}
+ ],
+ "other_evidence": [
+  {"key": "cheung2023factllama", "name": "FactLLaMA", "year": 2023, "rawfc": [56.11, 55.50, 55.65], "liar": [32.46, 32.05, 30.44],
+   "backbone": "LLaMA-7B (LoRA)", "evidence": "Google search; LIAR instead of LIAR-RAW", "f1": "macro", "checked": "table"},
+  {"key": "zhang2023hiss", "name": "HiSS", "year": 2023, "rawfc": [53.4, 54.4, 53.9], "liar": [46.8, 31.3, 37.5],
+   "backbone": "GPT-3.5 (text-davinci-003)", "evidence": "Google search; LIAR instead of LIAR-RAW", "f1": "H", "checked": "table"},
+  {"key": "yue2024rafts", "name": "RAFTS", "year": 2024, "rawfc": [62.8, 52.6, 57.3], "liar": [47.1, 37.9, 42.0],
+   "backbone": "GPT-3.5", "evidence": "Wikipedia; LIAR instead of LIAR-RAW", "f1": "H", "checked": "table"},
+  {"key": "wang2025evicheck", "name": "EVICheck", "year": 2025, "rawfc": [66.3, 63.0, 63.3], "liar": null,
+   "backbone": "GPT-4 + Llama-3-8B (LoRA)", "evidence": "live web search", "f1": "macro", "checked": "table"},
+  {"key": "kong2026reflex", "name": "REFLEX", "year": 2026, "rawfc": [65.04, 65.01, 64.99], "liar": null,
+   "backbone": "LLaMA-2-7B", "evidence": "none at inference; trained with the gold explanations", "f1": "macro", "checked": "table"},
+  {"key": "kumar2025entailed", "name": "LoRA on evidence sentences (Kumar et al.)", "year": 2025, "rawfc": [null, null, 66.0], "liar": [null, null, 29.0],
+   "backbone": "Qwen2.5-7B (LoRA)", "evidence": "the datasets' evidence sentences", "f1": "macro", "checked": "table",
+   "note": "their plain fine-tuning baseline, 3 seeds; reported with two decimals as 0.66 / 0.29"}
+ ]
+}

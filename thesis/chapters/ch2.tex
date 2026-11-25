@@ -1,3 +1,104 @@
-\chapter{相关工作与技术基础}\label{ch:related}
+\chapter{相关理论与技术基础}\label{ch:background}
 
-（待撰写）
+本章介绍后续两章用到的任务形式、模型与技术：\ref{sec:bg-task}~节给出虚假新闻检测与声明验证的任务形式和评价指标；\ref{sec:bg-lm}~节介绍预训练语言模型与大语言模型，以及从大语言模型读取类别概率的方式；\ref{sec:bg-lora}~节介绍参数高效微调；\ref{sec:bg-mil}~节介绍多示例学习；\ref{sec:bg-ir}~节介绍文本检索与检索增强；\ref{sec:bg-sel}~节介绍选择性预测与校准。
+
+\section{任务形式与评价指标}\label{sec:bg-task}
+
+\subsection{闭卷检测与开卷验证}
+
+本文涉及两种任务形式，它们的区别在于模型在判断时能够使用哪些信息。
+
+\subsubsection{闭卷检测}
+给定一条新闻或社交媒体消息 $x$，预测其真实性标签 $y\in\{0,1\}$（$1$ 表示虚假），模型只能使用 $x$ 的文本本身，不使用传播数据，也不检索外部证据。这一设定对应消息刚出现、尚无事实核查报道与社交反馈的阶段，是基于内容的虚假新闻检测的基本形式\citep{shu2017fake,zhou2020survey}。第~\ref{ch:clara}~章研究这一设定。
+
+\subsubsection{开卷验证}
+给定一条待核查的声明 $c$ 与一个证据来源，预测 $c$ 的真实性等级 $y\in\{1,\dots,C\}$。等级通常是有序的，例如事实核查机构 PolitiFact 使用从“完全错误”到“属实”的六级评定\citep{wang2017liar}。证据来源可以是维基百科\citep{thorne2018fever}、搜索引擎返回的网页\citep{popat2018declare,schlichtkrull2023averitec}，或为每条声明收集的原始新闻报道\citep{yang2022cofced}。系统一般包含证据检索与声明验证两个环节\citep{guo2022survey}。第~\ref{ch:openbook}~章研究这一设定，其中每条声明附带一个由若干篇原始报道组成的候选证据池。
+
+\subsection{评价指标}
+
+设测试集上类别 $k$ 的精确率与召回率为 $P_k$、$R_k$，各类别的 F1 值为 $F_k=2P_kR_k/(P_k+R_k)$。本文以宏平均 F1（macro-F1）为主指标：
+\begin{equation}
+\text{macro-F1}=\frac{1}{C}\sum_{k=1}^{C}F_k ,
+\end{equation}
+它对各类别一视同仁，适合类别不均衡的数据。同时报告宏平均精确率 $\frac1C\sum_kP_k$、宏平均召回率 $\frac1C\sum_kR_k$ 与准确率。对有序标签，另外报告预测等级与真实等级之差的平均绝对值（MAE），用来区分“差一级”与“差多级”的错误。
+
+\subsection{显著性检验}
+
+本文的可训练方法都报告多个随机种子的均值与标准差，并用两种互补的检验判断两种方法之间的差异是否可靠。
+
+第一种是对测试样本的配对 bootstrap\citep{koehn2004statistical}：对测试集做有放回的重采样，在每个重采样集上计算两种方法（各自对种子取平均）的指标之差，由差值的经验分布得到置信区间与双侧 $p$ 值，记为 $p_{\text{样本}}$。它刻画测试集有限带来的不确定性，但把已训练好的模型视为固定。第二种是对随机种子的 Welch $t$ 检验，记为 $p_{\text{种子}}$，它刻画训练过程的随机性，在种子数较少时功效有限。两种检验回答的问题不同：前者问“换一批测试样本，差异是否还在”，后者问“重新训练一次，差异是否还在”。只有两者都在 0.05 水平上成立时，本文才称一个差异显著；所有检验均未做多重比较校正，因此贴近 0.05 的结果只应视为弱证据。
+
+\section{预训练语言模型与大语言模型}\label{sec:bg-lm}
+
+\subsection{编码器模型}
+
+Transformer\citep{vaswani2017attention} 以自注意力为基本运算，是当前预训练语言模型的通用骨架。BERT\citep{devlin2019bert} 及其改进 RoBERTa\citep{liu2019roberta} 属于编码器模型：用掩码语言模型目标预训练一个双向 Transformer 编码器，下游任务在其输出表示上接一个分类头并微调全部或部分参数。这类模型规模在一亿到三亿参数之间，本文按领域内的习惯称之为小模型（small language model, SLM）。在虚假新闻检测中，微调的 BERT 长期是基于内容方法的标准骨干。
+
+\subsection{生成式大语言模型}
+
+大语言模型（large language model, LLM）是在大规模语料上以“预测下一个词元”为目标训练的解码器模型\citep{brown2020gpt3}。给定前文 $w_{<t}$，模型输出下一个词元的分布
+\begin{equation}
+P(w_t\mid w_{<t})=\operatorname{softmax}\big(\bm W_{\!o}\,\bm h_{t-1}\big),
+\end{equation}
+其中 $\bm h_{t-1}$ 是最后一层在位置 $t-1$ 的隐状态，$\bm W_{\!o}$ 是输出嵌入矩阵。由于注意力是单向的，位置 $t$ 的隐状态只依赖它之前的输入。经过指令微调的 LLM 以对话形式使用：系统提示与用户输入按固定模板拼接，模型续写回答。本文使用开源的 Qwen2.5-7B-Instruct\citep{qwen25} 与 Qwen3-8B\citep{qwen3}，它们可以在单张 24\,GB 显卡上以半精度运行并微调。
+
+\subsection{从大语言模型读取类别概率}\label{sec:bg-readout}
+
+让 LLM 做分类有两种方式。一种是让它生成一段文字再从中解析答案，这种方式得到的是离散的判断，且解析可能失败。另一种是把候选答案限定为若干个各占一个词元的选项（例如数字或字母），在回答的第一个位置上只取这些选项词元的 logit 并归一化：
+\begin{equation}
+P(y{=}k\mid x)=\frac{\exp(z_{a_k})}{\sum_{j=1}^{C}\exp(z_{a_j})},\qquad \bm z=\bm W_{\!o}\,\bm h_{\mathrm{ans}},\label{eq:readout}
+\end{equation}
+其中 $a_k$ 是第 $k$ 个选项的词元，$\bm h_{\mathrm{ans}}$ 是回答起始位置的隐状态。这种读出方式只需一次前向、不生成任何文本，得到的是连续的概率，既可以直接用于零样本判断，也可以作为微调时交叉熵损失的输入。本文两章中的零样本基线与微调的 LLM 都采用这种读出方式，使“是否微调”成为两者之间唯一的差别。
+
+\subsection{结构化解码}
+
+当需要 LLM 输出结构化内容（例如一组带字段的声明）时，可以用 JSON schema 约束解码：每一步只允许生成使输出仍可能符合 schema 的词元\citep{dong2024xgrammar}。本文用 vLLM\citep{kwon2023vllm} 的这一功能离线批量生成第~\ref{ch:clara}~章所需的 LLM 输出。
+
+\section{参数高效微调}\label{sec:bg-lora}
+
+对数十亿参数的 LLM 做全量微调在单卡上不可行。LoRA\citep{hu2022lora} 冻结预训练权重 $\bm W_0\in\mathbb R^{d\times k}$，只为它学习一个低秩增量：
+\begin{equation}
+\bm W=\bm W_0+\frac{\alpha}{r}\,\bm B\bm A,\qquad \bm B\in\mathbb R^{d\times r},\ \bm A\in\mathbb R^{r\times k},\ r\ll\min(d,k),
+\end{equation}
+其中 $\bm A$ 随机初始化，$\bm B$ 初始化为零，使训练开始时模型与预训练模型一致；$\alpha$ 是缩放系数。训练时只更新 $\bm A$ 与 $\bm B$，可训练参数量通常不到原模型的 1\%。本文把 LoRA 作用于注意力与前馈层的全部线性投影，秩取 16，对一个 7B 模型约有四千万可训练参数。微调时反向传播仍需保存各层的激活；输入较长时，可以用梯度检查点技术在反向传播中重新计算激活，以时间换取显存。
+
+\section{多示例学习}\label{sec:bg-mil}
+
+多示例学习（multiple instance learning, MIL）\citep{dietterich1997solving,carbonneau2018mil}处理只有“包”级标签的数据：一个包 $X=\{x_1,\dots,x_K\}$ 由若干实例组成，训练时只知道包的标签 $Y$。标准假设是包为正当且仅当至少有一个实例为正，
+\begin{equation}
+Y=1\iff\exists k,\ z_k=1 ,
+\end{equation}
+其中 $z_k$ 是不可观测的实例标签。若模型为每个实例给出 $p_k=P(z_k{=}1)$，并近似认为各实例相互独立，包为正的概率由 noisy-OR 给出\citep{maron1998framework}：
+\begin{equation}
+P(Y{=}1\mid X)=1-\prod_{k=1}^{K}(1-p_k).
+\end{equation}
+这一假设带有不对称性：负包中的每个实例都必为负，因而得到确定的实例级监督；正包只保证其中至少一个实例为正。另一类做法是用注意力对实例表示加权求和后再分类\citep{ilse2018attention}，它不要求实例概率，但注意力权重也不再具有“实例为正的概率”这一含义。第~\ref{ch:clara}~章把一条新闻看作由若干声明构成的包，采用 noisy-OR 聚合，并把注意力聚合作为对照。
+
+\section{文本检索与检索增强}\label{sec:bg-ir}
+
+\subsection{词项匹配检索}
+
+BM25\citep{robertson2009bm25} 是使用最广的词项匹配检索函数。对查询 $q$ 与文档 $d$，
+\begin{equation}
+\begin{aligned}
+\operatorname{BM25}(q,d)&=\sum_{t\in q}\operatorname{IDF}(t)\cdot\frac{f(t,d)\,(k_1+1)}{f(t,d)+k_1\big(1-b+b\,|d|/\overline{|d|}\big)},\\
+\operatorname{IDF}(t)&=\ln\!\Big(1+\frac{N-n_t+0.5}{n_t+0.5}\Big),
+\end{aligned}\label{eq:bm25}
+\end{equation}
+其中 $f(t,d)$ 是词项 $t$ 在 $d$ 中的出现次数，$|d|$ 是文档长度，$\overline{|d|}$ 是平均文档长度，$N$ 是文档总数，$n_t$ 是包含 $t$ 的文档数，$k_1$ 与 $b$ 是控制词频饱和与长度归一化的参数。BM25 不需要训练，对专有名词与数字的精确匹配很有效，但无法处理措辞不同而语义相同的情形。
+
+\subsection{稠密检索与重排序}
+
+稠密检索用双塔编码器把查询与文档映射到同一向量空间，以向量内积衡量相关性\citep{karpukhin2020dpr}。实际系统常采用两阶段流程：第一阶段用低成本的检索器取回较多候选，第二阶段用更强的模型对候选重排序，只把排在前面的少量文本交给下游模型。
+
+\subsection{检索增强的大语言模型}
+
+检索增强生成（retrieval-augmented generation, RAG）\citep{lewis2020rag}把检索到的文本拼入 LLM 的输入，使其回答有据可依，是缓解 LLM 知识过时与幻觉的常用手段。检索结果中往往夹杂无关内容，后续工作因而让 LLM 自己参与对检索内容的判断：Self-RAG\citep{asai2024selfrag}训练模型生成特殊的反思词元来评价检索到的段落是否相关、回答是否有依据；RankRAG\citep{yu2024rankrag}用同一个指令微调的 LLM 完成上下文排序与答案生成两项任务。第~\ref{ch:openbook}~章的方法与这一思路有关，区别将在该章说明。
+
+\section{选择性预测与校准}\label{sec:bg-sel}
+
+选择性预测允许模型在把握不足时拒绝回答。给定置信度函数，按置信度从高到低只保留比例为 $\phi$ 的样本，保留样本上的错误率称为该覆盖率下的风险；风险随覆盖率变化的曲线称为风险--覆盖率曲线，其下面积（AURC）越小，说明置信度对预测是否正确的排序越好\citep{geifman2017selective,geifman2019bias}。校准衡量置信度的数值本身是否可信：把样本按置信度分箱，期望校准误差（ECE）是各箱内平均置信度与准确率之差的加权平均\citep{guo2017calibration}。
+
+\section{本章小结}
+
+本章给出了闭卷检测与开卷验证两种任务形式、本文采用的评价指标与显著性检验标准，并介绍了后续两章依赖的技术：编码器模型与生成式大语言模型及其类别概率的读出方式、LoRA 微调、多示例学习、文本检索与检索增强，以及选择性预测。

@@ -98,6 +98,31 @@ def test_views(corpus, ranking):
     ch = V.chunked(items[:2], r, 6, 12)
     assert len(ch) == 4 and sorted(c for ex in ch[:2] for c in ex["cands"]) == sorted((a, b) for a, b, _ in r[items[0]["id"]][:12])
     assert V.closed(items)[0]["evidence"] is None
+    orc = V.oracle(items, r, 6, 12)
+    assert all(sum(o["tags"]) >= sum(x["tags"]) for o, x in zip(orc, std)) and sum(sum(o["tags"]) for o in orc) > sum(sum(x["tags"]) for x in std) - 1
+    assert all(set(o["cands"]) <= {(a, b) for a, b, _ in r[it["id"]][:12]} for o, it in zip(orc, items))
+    hidden = V.withhold_claim(std)
+    assert all(h["claim"] != ex["claim"] and h["evidence"] == ex["evidence"] and h["label"] == ex["label"] for h, ex in zip(hidden, std))
+    assert len({h["claim"] for h in hidden}) == 1 and std[0]["claim"].startswith("The ")        # the originals are untouched
+
+
+def test_perturbations(corpus, ranking):
+    items, r = corpus.split("test"), ranking["strict"]
+    sw_items, sw_rank = V.perturb(items, r, "swap", 5, 10, seed=0)
+    assert [it["id"] for it in sw_items] == [it["id"] for it in items] and [it["label"] for it in sw_items] == [it["label"] for it in items]
+    for it, orig in zip(sw_items, items):
+        pool = sw_rank[it["id"]]
+        assert len(pool) == 10 and all(V.is_foreign(it, (a, b)) for a, b, _ in pool)
+        assert all(it["reports"][a]["ev"][b] == 0 for a, b, _ in pool)                 # foreign sentences carry no tag
+        assert it["reports"][:len(orig["reports"])] == orig["reports"] and "n_reports_own" not in orig
+    mx_items, mx_rank = V.perturb(items, r, "mix", 5, 10, seed=0)
+    for it in mx_items:
+        flags = [V.is_foreign(it, (a, b)) for a, b, _ in mx_rank[it["id"]]]
+        assert sum(flags) == 5 and flags[:4] == [False, True, False, True]            # interleaved by rank
+    ex = V.standard(mx_items, mx_rank, 6)[0]
+    assert len(ex["evidence"]) == 6 and sum(V.is_foreign(mx_items[0], c) for c in ex["cands"]) == 3
+    dt_items, dt_rank = V.perturb(items, r, "droptop", 5, 10)
+    assert all(dt_rank[it["id"]] == r[it["id"]][5:] for it in items) and dt_items == list(items)
 
 
 def test_prompt():
@@ -111,7 +136,9 @@ def test_metrics():
     y = np.array([0, 1, 2, 0, 1, 2])
     good = np.eye(3)[y]
     m = classification_metrics(y, good)
-    assert m["macf1"] == 1.0 and m["acc"] == 1.0 and m["mae"] == 0.0
+    assert m["macf1"] == 1.0 and m["acc"] == 1.0 and m["mae"] == 0.0 and m["f1_h"] == 1.0
+    skew = classification_metrics(y, np.eye(3)[np.array([0, 0, 2, 0, 0, 2])])
+    assert abs(skew["f1_h"] - 2 * skew["macp"] * skew["macr"] / (skew["macp"] + skew["macr"])) < 1e-12 and skew["f1_h"] != skew["macf1"]
     bad = np.eye(3)[np.array([1, 1, 1, 1, 1, 1])]
     assert abs(classification_metrics(y, bad)["macf1"] - (2 * (1 / 3) / (1 + 1 / 3)) / 3) < 1e-9
     b = paired_bootstrap(y, [good.argmax(1)], [bad.argmax(1)], 3, n_boot=300)
@@ -188,6 +215,19 @@ def test_training_and_two_pass(tiny, corpus, ranking):
         assert min(sc[c] for c in sel) >= max(x for c, x in sc.items() if c not in sel) - 1e-9   # the best five
     one = P.single_pass(v, V.standard(val, r, 5), 3, batch=4)
     assert all(len(sc) == 5 for sc in one["scores"]) and 0 <= P.silver_precision(val, out["selected"]) <= 1
+    assert P.read_ensemble(v, val, r, 5, 10, 3, batch=4).shape == (9, 3)
+    # diagnostics run for both inference procedures
+    for select in (True, False):
+        run = (lambda items, rk: P.read_select_verify(v, items, rk, 5, 10, 3, batch=4)) if select else \
+              (lambda items, rk: P.single_pass(v, V.standard(items, rk, 5), 3, batch=4))
+        pert = {}
+        for kind in ("swap", "halfswap"):
+            items_p, rank_p = V.perturb(val, r, {"halfswap": "mix"}.get(kind, kind), 5, 10, seed=0)
+            pert[kind] = (items_p, run(items_p, rank_p))
+        d = P.evidence_diagnostics(val, r, 5, run(val, r), pert, select)
+        assert all(0.0 <= d[k] <= 1.0 for k in ("auc_silver", "silver_p_pool", "silver_p_bm25", "auc_own_vs_foreign", "auc_usable"))
+        assert ("halfswap_foreign_sel" in d) == select == ("silver_p_selected" in d)
+        assert len(P.score_maps(val, run(val, r))[0]) == (10 if select else 5)
     # restoring a state reproduces predictions
     st = v.state()
     p1 = P.single_pass(v, V.standard(val, r, 5), 3, batch=4)["prob"]

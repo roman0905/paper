@@ -6,15 +6,14 @@ of the option letters at the first answer position, so no text is generated at i
 from typing import List, Optional, Sequence, Tuple
 
 LETTERS = "ABCDEFGH"
+#: what the verifier is shown instead of the claim in the evidence-only control
+NO_CLAIM = "(the claim is withheld)"
 
 SYSTEM = ("You are an experienced fact-checker. You are given a claim and sentences retrieved from news reports. "
           "Judge how truthful the claim is. Rely on the evidence where it addresses the claim; "
           "the evidence may be incomplete, noisy or irrelevant.")
 SYSTEM_CLOSED = ("You are an experienced fact-checker. You are given a claim without any evidence. "
                  "Judge how truthful the claim is from the claim itself and your own knowledge.")
-
-#: the extra option of verifiers trained with mismatched evidence
-NEI_TEXT = "cannot tell: the evidence does not address this claim"
 
 
 def format_evidence(evidence: Sequence[Tuple[str, str]], max_words: int = 60) -> str:

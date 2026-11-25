@@ -1,3 +1,83 @@
 \chapter{绪论}\label{ch:intro}
 
-（待撰写）
+\section{研究背景与意义}\label{sec:intro-bg}
+
+社交媒体与新闻聚合平台降低了信息发布与传播的门槛，也使虚假新闻得以在短时间内大范围扩散。虚假新闻干扰公众对公共卫生、选举、金融等事件的判断，而人工事实核查的产能远远跟不上信息产生的速度。自动化的虚假新闻检测因此长期受到自然语言处理与数据挖掘领域的关注\citep{shu2017fake,zhou2020survey,guo2022survey}。
+
+近年来，以 GPT 系列为代表的大语言模型（large language model, LLM）展现出很强的语言理解与生成能力，一个自然的想法是借助它的常识与推理能力来判断新闻真伪。然而已有研究表明，直接让 LLM 判断新闻真伪并不比微调的小模型更准确\citep{hu2024bad}；LLM 生成的内容还可能包含与事实不符的“幻觉”。如何有效而可靠地利用 LLM，仍是这一方向的核心问题。围绕这一问题，现有工作大致沿两条路线展开。
+
+第一条路线是\emph{闭卷}检测：只根据新闻文本本身判断真伪，不引入外部信息。这类方法让 LLM 为新闻写出分析理由，或让多个 LLM 智能体就新闻的真伪展开辩论，再由可训练的模块作出裁决\citep{hu2024bad,he2026factguard,liu2025ted}。它们部署简单，适用于新闻刚出现、尚无任何核查报道的阶段，但 LLM 的分析完全来自其参数中的知识，分析是否可靠难以判断。
+
+第二条路线是\emph{开卷}验证：为待核查的声明检索外部证据，再根据证据判断其真实性\citep{thorne2018fever,yang2022cofced}。证据使判断有据可依，但也带来新的问题：检索到的材料良莠不齐，其中可能混有已经给出结论的事实核查文章，使评测结果虚高\citep{glockner2022missing}；模型也未必真正依据证据作出判断\citep{hansen2021reason,deng2026real}。
+
+本文依次研究这两种设定。在算力上，本文把自己限制在单张 24\,GB 显存的消费级显卡与 7B--8B 规模的开源 LLM 之内，不依赖闭源模型的接口。这一限制既出于可复现性的考虑，也对应多数研究者与中小机构的实际条件。本文希望回答三个问题：在闭卷条件下，把 LLM 的分析做得更细能否带来可靠的提升；这类检测器的判断究竟依据什么；引入外部证据之后，如何让一个可在单卡上训练的 LLM 既准确又知道证据何时不可用。
+
+这一研究的意义体现在两个方面。在方法上，本文给出了可在单卡上训练与部署的检测与验证方法，并通过消融逐一检验了其中每个部件的作用。在评测上，本文强调受控的比较：统一所用的 LLM、超参数搜索与随机种子，报告显著性检验，并针对“模型是否只利用了文风”“证据是否泄漏了结论”“模型是否真的使用了证据”这些容易被忽视的问题设计了专门的测试。本文如实报告了其中的负面结果，这些结果对判断该领域已发表方法之间的差距同样有参考价值。
+
+\section{国内外研究现状}\label{sec:intro-related}
+
+\subsection{基于内容的虚假新闻检测}
+
+基于内容的检测长期依赖小规模预训练语言模型（small language model, SLM）学习文本模式\citep{shu2017fake,devlin2019bert}，并发展出多领域建模\citep{nan2021mdfend,zhu2023m3fend}与缓解实体偏置\citep{zhu2022endef}等方向。这类模型容易依赖写作风格等捷径特征\citep{geirhos2020shortcut}：SheepDog\citep{wu2024sheepdog}表明，用 LLM 改写新闻的文风即可显著降低检测器的性能；后续工作研究了对抗式风格增强\citep{park2024adstyle}与保持事实的情绪改写\citep{guo2026emotion}。LLM 生成的虚假信息也比人写的更难检测\citep{chen2024can,chen2024combating}。
+
+\subsection{大语言模型与小模型协同的检测方法}
+
+Hu 等\citep{hu2024bad}发现 GPT-3.5 直接判断真伪不如微调的 BERT，但它从不同视角给出的理由对 SLM 有帮助，据此提出 ARG：SLM 读取新闻与两条 LLM 理由，并用一个理由可用性评估器为每条理由预测权重，监督信号是“该理由对应的 LLM 判断是否等于标签”。FactGuard\citep{he2026factguard}让 LLM 抽取以事件为中心的 topic-content 以削弱写作风格的影响，并加入常识理由与类似的可用性机制。其他工作让 LLM 生成评论或用户反应\citep{nan2024genfend,wan2024dell}，把 SLM 的预测作为 LLM 的上下文\citep{xu2024supericl}，用 LLM 回答一组人工设计的问题并交给可学习的逻辑层\citep{liu2024teller}，或把 LLM 预测的可信度信号作为弱标签\citep{leite2023pastel}。
+
+这些方法对 LLM 输出的可用性判断都停留在整条理由一级：一条理由只对应一个权重，理由内部哪一句可信、哪一句是幻觉无从区分。DiFaR\citep{wan2025difar}对理由做句级过滤，但它是训练前的后处理，其事实性过滤依赖外部知识检索，面向多模态场景。另一方面，参数高效微调\citep{hu2022lora}使得直接把开源 LLM 微调为分类器成为可行的强基线\citep{raza2024comparative}，而上述协同工作通常没有与之比较。
+
+\subsection{多智能体辩论}
+
+让多个 LLM 实例相互辩论可以改进事实性与推理\citep{du2024debate,liang2024mad,chan2024chateval}。TED\citep{liu2025ted}把正式辩论流程引入虚假新闻检测，由正反两队经多个阶段辩论，再由一个可训练的分析模块在辩论图上裁决；D2D\citep{han2025d2d}设计了五阶段辩论与多维评判。这类方法每条新闻需要多次 LLM 调用。值得注意的是，TED 的消融显示去掉可训练裁决模块的损失远大于去掉辩论流程本身\citep{liu2025ted}，FactGuard 也报告用两个简单提示即可达到与之相近的精度\citep{he2026factguard}。这提示在闭卷条件下，如何裁决 LLM 的输出可能比生成更长的辩论更重要。
+
+\subsection{证据驱动的事实核查}
+
+\subsubsection{任务与数据集}
+事实核查把问题拆成证据检索与声明验证两步\citep{guo2022survey}。FEVER\citep{thorne2018fever}以维基百科为证据来源，其声明由标注者改写维基百科句子得到；面向真实声明的数据集则从事实核查网站收集声明与结论，例如来自 PolitiFact 的 LIAR\citep{wang2017liar}，并以搜索引擎返回的网页作为证据\citep{popat2018declare,schlichtkrull2023averitec}。把复杂声明分解为可独立核查的子问题或原子事实，是这一方向的常用手段\citep{chen2022claimdecomp,pan2023programfc,zhang2023hiss,min2023factscore}。
+
+Yang 等\citep{yang2022cofced}指出，直接使用核查机构撰写的核查文章作为证据不符合实际：声明尚未被核查时并没有这样的文章可用。他们为每条声明收集搜索引擎返回的\emph{原始报道}，构建了 RAWFC（声明与结论来自 Snopes，三分类）与 LIAR-RAW（来自 PolitiFact，六分类）两个数据集，并提出由粗到细逐级蒸馏证据的 CofCED 模型。此后这两个数据集成为“基于原始报道的可解释虚假新闻检测”的常用基准。
+
+\subsubsection{基于原始报道的方法}
+L-Defense\citep{wang2024ldefense}先从报道中抽取分别支持“声明为真”与“声明为假”的两组证据，由 LLM 为两方各写一段解释，再由 SLM 综合判断；其后续工作 G-Defense\citep{wang2026gdefense}把声明分解为若干子声明，并构建以声明为中心的图来组织各子声明的证据与解释。EExpFND\citep{wang2025eexpfnd}在训练中利用核查结论文本，并处理训练与测试时解释分布不一致的问题；REFLEX\citep{kong2026reflex}同样把人工撰写的解释作为微调目标。DeReC\citep{qazi2025derec}表明，稠密检索加一个微调的编码器分类器即可达到或超过生成解释的方法，而开销低得多。另有工作用多智能体协作\citep{xiong2025delphiagent}、多方面语义聚类\citep{nguyen2025facets}或由报道构建的知识图谱\citep{lourenco2026kgcraft}组织证据。
+
+\subsubsection{大语言模型作为验证器}
+HiSS\citep{zhang2023hiss}用分层的逐步提示让 LLM 分解声明并调用搜索引擎；FFRR\citep{zhang2024ffrr}用黑盒 LLM 的反馈以强化学习训练检索器；RAFTS\citep{yue2024rafts}让 LLM 根据检索结果合成正反两方的论证。也有工作直接微调开源 LLM：FactLLaMA\citep{cheung2023factllama}用 LoRA 微调模型阅读搜索到的证据，EVICheck\citep{wang2025evicheck}让 LLM 对每条证据独立推理后由微调的模型综合，Kumar 等\citep{kumar2025entailed}比较了多种 7B--8B 模型阅读证据句的微调效果。在检索增强的一般框架下，让同一个 LLM 兼任检索内容的评判者与答案的生成者已被证明有效\citep{asai2024selfrag,yu2024rankrag}；在编码器时代的事实核查中，联合学习证据选择与真实性判断也是常见设计\citep{fajcik2022claimdissector,wadden2021multivers}。
+
+\subsubsection{证据泄漏与证据依赖}
+开卷设定有两个评测上的隐患。其一是\emph{证据泄漏}：Glockner 等\citep{glockner2022missing}指出，从网络检索到的“证据”常常直接或间接来自事实核查文章，模型依赖这些泄漏的证据才取得高分；仅屏蔽核查机构的域名并不足以消除泄漏。在 RAWFC 与 LIAR-RAW 上，数据集的构建者过滤了核查网站并去掉了晚于核查文章发布的报道\citep{yang2022cofced}，FFRR\citep{zhang2024ffrr}用模式匹配进一步去掉了被判为泄漏的文档，但没有给出去除前后的对照；其余方法大多直接使用全部报道。其二是\emph{证据依赖}：Hansen 等\citep{hansen2021reason}发现，在政治类核查数据集上，只看证据、不看声明的模型往往与完整模型一样好，说明模型未必在做声明与证据之间的推理；Deng 等\citep{deng2026real}发现现成的 LLM 验证器更多依赖参数中的知识而不是所给的证据，并提出用证据消融来训练模型。检索到的证据还可能被蓄意污染\citep{qazi2026glad}，或因证据不足而无法支撑判断\citep{atanasova2022insufficient}。针对事实验证模型的捷径依赖，已有工作构造对称测试集\citep{schuster2019debiasing}与对比式的证据对\citep{schuster2021vitaminc,lee2021crossaug}。
+
+\subsection{多示例学习与弱监督定位}
+
+多示例学习只需包级标签即可学习实例级判别\citep{dietterich1997solving,maron1998framework,ilse2018attention,carbonneau2018mil}。在虚假信息检测中，dEFEND\citep{shu2019defend}用句子与评论的协同注意力挑选可解释的句子；WSDMS\citep{yang2023wsdms}在只有文章级标签的条件下检测误导性句子，其句子级证据来自相关的社交媒体讨论；Yang 等\citep{yang2025llmmil}用 LLM 增强的多示例学习联合预测帖子立场与谣言真伪，实例是传播中的帖子。这些方法的实例证据都来自社交上下文。
+
+\subsection{评测规范}
+
+Thibault 等\citep{thibault2025guide}系统审查了常用的虚假信息数据集，指出其中普遍存在虚假相关与不可核查的样本；RealFactBench\citep{yang2025realfactbench}与 LiveFact\citep{xu2026livefact}强调模型应能识别“无法判定”的情形。选择性分类\citep{geifman2017selective,geifman2019bias}与校准\citep{guo2017calibration}为此提供了度量工具，LLM 自身置信度的可靠性也已有专门研究\citep{xiong2024can,tian2023just}。
+
+\subsection{现有研究的不足}
+
+综合以上工作，可以看到三点不足。
+
+第一，闭卷方法对“何时采信 LLM”的建模粒度过粗，并且缺少对其有效性来源的检验。已发表方法之间的差距常在 1 个百分点左右，却多来自单次运行，不同方法所用的 LLM 也不相同；它们很少与“直接微调同一个 LLM”这样的强基线比较，也很少检验模型是否只是利用了文风。
+
+第二，开卷方法的评测对证据泄漏控制不足。在以原始报道为证据的数据集上，报道中是否混有核查文章乃至数据集本身的副本，很少被检查；去除这些来源之后方法的表现如何，缺少成对的对照。
+
+第三，开卷的 LLM 验证器在证据不可用时的行为缺少约束。检索返回的材料与声明无关时，模型应当能够发现这一点，而不是给出一个看似有据的判断。已有工作或者不考察这种情形，或者只在编码器模型上研究证据不足的识别。
+
+\section{本文的主要研究内容}\label{sec:intro-contrib}
+
+（待全部实验完成后撰写）
+
+\section{论文组织结构}\label{sec:intro-org}
+
+本文共分五个部分。
+
+第~\ref{ch:intro}~章为绪论，介绍研究背景与意义、国内外研究现状、本文的主要研究内容与组织结构。
+
+第~\ref{ch:background}~章介绍相关理论与技术基础，包括任务形式与评价指标、预训练语言模型与大语言模型、参数高效微调、多示例学习、文本检索与检索增强，以及选择性预测。
+
+第~\ref{ch:clara}~章研究闭卷条件下的虚假新闻检测，提出声明级论证裁决方法 \method{}，并通过受控评测分析闭卷检测器的判断依据。
+
+第~\ref{ch:openbook}~章研究带有外部证据的声明验证，提出证据驱动的验证方法，并在控制证据泄漏的条件下进行评测。
+
+最后为结语，总结全文工作并展望后续研究方向。
