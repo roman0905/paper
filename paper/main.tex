@@ -37,6 +37,14 @@
 \SetKwInput{KwIn}{输入}
 \SetKwInput{KwOut}{输出}
 \renewcommand{\algorithmcfname}{算法}
+% 兼容性修复：加载 xeCJK 后，algorithm2e 用 \global\sbox 保存的标题盒子会丢失（算法标题不显示），
+% 这里改用 \global\setbox 重新定义 ruled 样式的标题盒子。
+\makeatletter
+\renewcommand{\algocf@makecaption@ruled}[2]{%
+  \global\setbox\algocf@capbox\hbox{\hskip\AlCapHSkip
+    \setlength{\algocf@lcaptionbox}{\hsize}\addtolength{\algocf@lcaptionbox}{-\AlCapHSkip}%
+    \parbox[t]{\algocf@lcaptionbox}{\algocf@captiontext{#1}{#2}}}}
+\makeatother
 
 \input{numbers.tex}
 

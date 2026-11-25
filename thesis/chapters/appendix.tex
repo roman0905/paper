@@ -1,0 +1,135 @@
+\chapter{提示词}\label{app:prompt}
+
+\section{第~\ref{ch:clara}~章使用的提示词}\label{app:prompt-clara}
+
+\subsubsection{声明分解与双立场论证（中文）}
+下面是 \method{} 结构化调用的系统提示与用户提示。$a^+$ 与 $a^-$ 的书写顺序按样本编号的奇偶交替，这里给出先写支持论证的版本。输出受 JSON schema 约束，字段依次为 \texttt{first\_impression}、\texttt{claims}（每条含 \texttt{claim}、\texttt{type}、\texttt{sent}、两条论证与 \texttt{suspicion}）和 \texttt{overall}。
+
+\input{gen/tables/prompt_clara_zh.tex}
+
+\subsubsection{声明分解与双立场论证（英文）}
+
+\input{gen/tables/prompt_clara_en.tex}
+
+\subsubsection{基线的提示词}
+零样本、零样本 CoT 以及 ARG 的两个视角（文字描述、常识）使用 ARG 论文附录中的提示\citep{hu2024bad}；FactGuard 的 topic-content 抽取使用其官方仓库中的提示\citep{he2026factguard}。为便于从输出中解析判断，我们在 ARG 的提示后追加了一句长度与输出格式的要求。
+
+\subsubsection{风格改写（中文）}
+
+\input{gen/tables/prompt_style_zh.tex}
+
+\subsubsection{单句事实篡改（中文）}
+
+\input{gen/tables/prompt_tamper_zh.tex}
+
+\chapter{第~\ref{ch:clara}~章的实现细节与补充实验}\label{app:clara}
+
+\section{实现细节}\label{app:impl}
+
+\subsubsection{离线生成}
+LLM 输出用 vLLM\citep{kwon2023vllm} 批量生成。分析类提示（声明分解、零样本、CoT、ARG 的两个视角）采用贪心解码；topic-content 抽取沿用 FactGuard 仓库的温度 0.2；风格改写与事实篡改由 Qwen3-8B 在关闭思考模式、温度 0.3 下生成。声明分解的最大输出长度为 1{,}200 个 token，输出无法解析时以更宽松的约束重试一次。两个数据集共 15{,}522 条新闻，首次生成即可解析的比例为 \ptwo{CN/cost/clara_first_attempt_rate}\%（中文）与 \ptwo{EN/cost/clara_first_attempt_rate}\%（英文），其余在重试后全部解析成功。
+
+\subsubsection{裁决器}
+隐藏层维度 384，dropout 0.2；新闻、声明、声明--论证对的最大长度分别为 170、48 与 128 个 token。优化器为 Adam（FactGuard 按其官方实现用 AdamW），权重衰减 $5\times10^{-5}$。标量参数（$\alpha,\alpha_0,\gamma,b$ 以及 BERT+ZS 的融合权重 $w$）单独使用学习率 $10^{-2}$：在编码器的学习率下，Adam 在整个训练过程中至多把一个标量移动约 0.02，这类参数实际上不会离开初始值。可训练的编码器层用混合精度计算。
+
+\subsubsection{LoRA-LLM}
+秩 16，缩放系数 32，dropout 0.05，作用于注意力与前馈层的全部线性投影；学习率 $10^{-4}$，线性预热 6\% 后线性衰减，等效批大小 16，训练 3 轮，每轮结束后在验证集上评估并按 macro-F1 选择。
+
+\subsubsection{蒸馏}
+ARG-D 与 FactGuard-D 的蒸馏权重与学习率取自各自的官方脚本。\student{} 的三个蒸馏权重均为 1，学习率与教师相同。
+
+\subsubsection{软硬件}
+全部实验在单张 RTX 3090（24\,GB）上完成。生成环境为 vLLM 0.26 与 PyTorch 2.11，训练环境为 PyTorch 2.4、Transformers 4.46 与 PEFT 0.13。
+
+\subsubsection{与官方设置的差异}
+（1）LLM 输出。ARG 官方使用 GPT-3.5 的理由。FactGuard 官方用本地部署的 DeepSeek-R1-Distill-Llama-8B（中文）与 SOLAR-10.7B（英文）抽取 topic-content，要求抽取结果与原文的余弦相似度超过阈值，否则重新抽取；其常识理由沿用 ARG 数据中的 GPT-3.5 理由\citep{he2026factguard}。本文把所有 LLM 输出统一为 Qwen2.5-7B；topic-content 用其官方仓库中的提示一次生成，没有做相似度过滤与重试，这可能对 FactGuard 不利。（2）编码器。FactGuard 官方在中文上使用 bert-base-chinese、英文上使用 RoBERTa，本文为所有方法统一了编码器。（3）FactGuard 的损失。可用性损失以 LLM 判断 $y_{\mathrm{llm}}$ 为目标；当 LLM 未给出明确判断时，本文取目标为 0.5。文本损失中 topic-content 分支的目标按论文公式取标签 $y$。前向计算与官方代码一致，包括其中以 topic-content 代替新闻原文参与交叉注意力的做法。（4）官方脚本只给出单个随机种子的配置，本文为多种子均值。（5）训练时冻结层的输出取自缓存，可训练层使用混合精度（附录~\ref{app:live}）。因此本文复现的数值与原论文不可直接比较，原论文报告的数值见 \ref{sec:main-results} 节。
+
+\section{训练协议的核对：冻结层缓存与混合精度}\label{app:live}
+
+为了在单张显卡上完成全部多种子实验，本文的 SLM 类方法在训练时做了两点工程上的改动：冻结的编码器层只前向一次，其输出以半精度缓存；可训练的层用混合精度计算。官方实现每一步都重新计算冻结层，并且全程使用单精度。本附录核对这两点改动是否影响结论。
+
+\subsubsection{三种训练方式}
+表~\ref{tab:live} 在 Weibo21 上用相同的 3 个种子比较三种训练方式：本文的协议（缓存加混合精度）、缓存加全精度，以及每步重新计算冻结层（全精度，与官方实现的计算一致）。缓存本身没有可见的影响：后两种方式在三种方法上的差别都在 0.3 个点以内。本文的协议（缓存加混合精度）单次运行的时间是每步重算的 4\%--10\%。BERT 与 \method{} 在三种方式下没有差别；使用 GPT-3.5 理由的 ARG 在混合精度下比另外两种方式低约 1 个点。
+
+\begin{table}[htbp]
+\centering\small
+\caption{三种训练方式的对比（Weibo21，3 个种子）}\label{tab:live}
+\fittable{gen/tables/live.tex}
+\note{macro-F1 为测试集结果（\%）；时间为单次运行（含评测）的平均秒数。}
+\end{table}
+
+\subsubsection{主实验配置在全精度下的复核}
+鉴于上表中 ARG 的差别，我们把主实验中各 SLM 类方法被选中的配置在全精度下用同样的 5 个种子重新训练了一遍（表~\ref{tab:fp32}）。在两个数据集、五种方法共十组对比中，没有一组在两种检验下都显著。BERT、BERT+ZS 与 \method{} 在两种精度下的逐种子结果几乎相同，同一种子的平均绝对差不超过 0.2 个点。ARG 与 FactGuard 则不然：同一种子在两种精度下平均相差 0.6--1.2 个点，最大相差 \ptwo{EN/fp32/methods/factguard/abs_diff_max} 个点，早停选中的轮次也多半不同。对这两种方法，改变数值精度的效果相当于换了一个随机种子。均值变化最大的是 GossipCop 上的 FactGuard，全精度下低 \ptwo{EN/derived/factguard_amp_minus_fp32} 个点（$p_{\text{样本}}\peq{EN/fp32/methods/factguard/bootstrap/p}$，$p_{\text{种子}}\peq{EN/fp32/methods/factguard/welch_p}$）。
+
+使用 GPT-3.5 理由、官方学习率的 ARG 是唯一接近显著的配置：5 个种子上混合精度为 \ptwo{CN/official_arg/ours_cached/mean}，全精度为 \ptwo{CN/official_arg/ours_fp32/mean}（$p_{\text{样本}}\peq{CN/official_arg/amp_vs_fp32/bootstrap/p}$，$p_{\text{种子}}\peq{CN/official_arg/amp_vs_fp32/welch_p}$），后者与官方代码的多种子均值（\ptwo{CN/official_arg/mean}）一致。按本文的标准这一差别不算显著，但不能排除混合精度对这一配置略有不利；换成 Qwen2.5-7B 的理由后，同一方法在 Weibo21 上两种精度的均值几乎相同（表~\ref{tab:fp32}）。
+
+\begin{table}[htbp]
+\centering\small
+\caption{主实验配置在混合精度与全精度下的测试集 macro-F1（\%）}\label{tab:fp32}
+\fittable{gen/tables/fp32.tex}
+\note{相同的 5 个种子；$p$ 值检验同一方法在两种精度下的差异。混合精度为本章主实验的协议。}
+\end{table}
+
+\subsubsection{对主要比较的影响}
+表~\ref{tab:fp32-sig} 给出两种精度下 \method{} 与各方法的差异。两种精度下一致的是：\method{} 与 ARG、BERT+ZS 在原始测试集上的差异都不显著；全部分析被整条替换时它与 ARG 没有差别。不一致的有两处。其一，混合精度下唯一显著的一组比较（Weibo21 上对 FactGuard）在全精度下不再显著，而 GossipCop 上对 FactGuard 的比较在全精度下变为显著（\dptwo{EN/fp32/clara_vs/factguard/diff_mean} 个点）；\method{} 自身的数值几乎没有变，变的是 FactGuard。其二，Weibo21 上全部声明被逐条替换时，\method{} 对 ARG 的优势在全精度下为 \ptwo{CN/fp32/clara_vs/arg_unit100/diff_mean} 个点，两种检验都显著；混合精度下为 \ptwo{CN/noise_sig/unit100/arg/diff_mean} 个点，只有对样本的检验显著。
+
+总的来说，正文的定性结论（\method{} 在分布内与 ARG、BERT+ZS 持平）不依赖数值精度；而 1 个点左右的差异会随数值精度这样与方法无关的实现细节出现或消失，不宜据此给方法排序。这次复核只覆盖原始测试集与两种替换测试，风格改写、事实篡改、消融、蒸馏与留一领域等其余实验只在混合精度下运行过。
+
+\begin{table}[htbp]
+\centering\footnotesize
+\setlength{\tabcolsep}{3pt}
+\caption{两种精度下 \method{} 与各方法的 macro-F1 之差}\label{tab:fp32-sig}
+\fittable{gen/tables/fp32_sig.tex}
+\note{\method{} 减去对方，单位为百分点；5 个种子。}
+\end{table}
+
+\section{学习率网格的全部结果}\label{app:grid}
+
+\begin{table}[htbp]
+\centering\small
+\caption{各方法在两个学习率下的验证集与测试集 macro-F1（\%）}\label{tab:grid}
+\fittable{gen/tables/grid.tex}
+\note{5 个种子的均值与标准差；加粗的验证集数值对应被选中的配置。}
+\end{table}
+
+\section{显著性检验}\label{app:sig}
+
+\begin{table}[htbp]
+\centering\small
+\caption{\method{} 与各方法在测试集 macro-F1 上的差异}\label{tab:sig}
+\fittable{gen/tables/sig.tex}
+\note{\method{} 减去对方，单位为百分点。置信区间与 $p_{\text{样本}}$ 来自对测试样本的配对 bootstrap，$p_{\text{种子}}$ 来自对随机种子的 Welch 检验。}
+\end{table}
+
+\section{敏感性分析}\label{app:sens}
+
+\method{} 的损失权重与错配负例比例是预先设定的。图~\ref{fig:sens} 给出每个超参数另取两个值时的结果，以及声明数上限 $K$ 的影响。各取值与默认值在相同种子上的差距都不超过 1 个点，没有一个在两种检验下都显著：差距最大的是 GossipCop 上 $K{=}1$（\dptwo{EN/claims_k/1/vs_default/diff_mean} 个点，$p_{\text{样本}}\peq{EN/claims_k/1/vs_default/bootstrap/p}$，$p_{\text{种子}}\peq{EN/claims_k/1/vs_default/welch_p}$）与 Weibo21 上 $\lambda_{\mathrm{gate}}{=}1$（\dptwo{CN/lambda_gate/1/vs_default/diff_mean} 个点，$p_{\text{样本}}\peq{CN/lambda_gate/1/vs_default/bootstrap/p}$，$p_{\text{种子}}\peq{CN/lambda_gate/1/vs_default/welch_p}$）。在 Weibo21 上，把声明数上限从 6 降到 1，macro-F1 只变化 \dptwo{CN/claims_k/1/vs_default/diff_mean} 个点；把多示例损失或判定门控损失的权重置零也没有可测的影响（\dptwo{CN/lambda_mil/0/vs_default/diff_mean} 与 \dptwo{CN/lambda_gate/0/vs_default/diff_mean} 个点），这与正文消融实验的结论一致：声明级的结构对分布内精度的贡献很小。由于每个取值只有 3 个种子，这里的比较只能排除大的效应。
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\linewidth]{gen/figures/sensitivity.pdf}
+\caption{\method{} 对声明数上限与预设超参数的敏感性}\label{fig:sens}
+\note{声明数上限 $K$ 在两个数据集上考察，错配负例比例 $\rho$ 与三个损失权重在 Weibo21 上考察。每个点为 3 个种子的均值，阴影为标准差；标“默认”的点是正文使用的取值在相同 3 个种子上的结果，灰色横线为 BERT。}
+\end{figure}
+
+\section{受控测试集的构建细节}\label{app:perturb}
+
+\subsubsection{风格改写}
+中文测试集 \cnt{CN/perturb/style_n} 条中有 \cnt{CN/perturb/style_rewritten} 条得到了可用的改写，英文 \cnt{EN/perturb/style_n} 条中为 \cnt{EN/perturb/style_rewritten} 条。被丢弃的主要是改写后长度超过原文 2.5 倍的短消息。作为事实保持程度的粗略代理，我们统计了原文中的数字串在改写后的保留比例：中文为 \pone{CN/fact_preservation/kept_rate}\%，英文为 \pone{EN/fact_preservation/kept_rate}\%。这只是一个代理指标，改写仍可能增删细节，这是 LLM 风格攻击的共同局限\citep{wu2024sheepdog}。
+
+\subsubsection{单句事实篡改}
+候选为测试集中至少含两句、且存在长度足够的句子的真新闻（中文 \cnt{CN/perturb/tamper_candidates} 条，英文 \cnt{EN/perturb/tamper_candidates} 条）。篡改模型给出的片段必须在句中恰好出现一次，替换后字母与数字内容必须发生变化，且替换不得改变分句结果。最终得到中文 \cnt{CN/perturb/tamper_n} 条、英文 \cnt{EN/perturb/tamper_n} 条，平均每条分别含 \fone{CN/perturb/tamper_mean_sents} 与 \fone{EN/perturb/tamper_mean_sents} 句。按篡改类型的定位结果见表~\ref{tab:loc-type}。
+
+\begin{table}[htbp]
+\centering\small
+\caption{按篡改类型划分的定位 Hit@1（\%）}\label{tab:loc-type}
+\fittable{gen/tables/loc_type.tex}
+\end{table}
+
+\section{样例}\label{app:cases}
+
+下面两条样例按预先固定的规则选出：篡改测试集中按编号排序、含 3--4 句且不超过 170 个字符的前两条，取随机种子 1 的模型输出，未做任何人工挑选。被篡改的句子与其原句用〔〕标出；表中 $+$ 与 $-$ 分别为 LLM 写出的支持论证与质疑论证，$v_k$、$r_k$、$g_k$、$p_k$ 依次为 LLM 的怀疑度、相关性门控、判定门控与实例概率。
+
+两条样例反映了正文中的几点观察。其一，两条篡改后的新闻都没有被判为假（$\hat y$ 接近 0），与表~\ref{tab:tamper} 一致。其二，对应被改句子的声明在各条声明中 $p_k$ 最高，定位是对的，但数值本身远低于 0.5。其三，7B 模型写出的论证质量不稳定：样例 1 中“支持”一栏写的其实是质疑；样例 2 中对应第 3 句的声明，其质疑论证称“具体日期和发言人姓名未明确提及”，而原文两者都有。这条与文本不符的论证并没有被相关性门控关闭：两条样例中所有声明的 $r_k$ 都接近 1。样例 2 的整体实例 $r_0$ 较低（0.40），从单个样例无法判断其原因。
+
+\input{gen/tables/cases.tex}

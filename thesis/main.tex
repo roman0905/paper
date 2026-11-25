@@ -1,0 +1,97 @@
+%!TEX encoding = UTF-8 Unicode
+%!TEX program = xelatex
+% 江西师范大学硕士学位论文（模板：hnuthesis.cls，2023 版；本地对字体加载做了两处兼容性修改，见类文件注释）
+
+\documentclass[UTF8, AutoFakeBold]{hnuthesis}
+\usepackage{amsmath,bm}
+\usepackage{float}
+\usepackage{array,makecell}
+\usepackage[export]{adjustbox}
+\usetikzlibrary{arrows.meta,positioning,fit,calc,backgrounds}
+
+% ---------------------------------------------------------------- 封面信息（请替换为本人信息）
+\clc{TP391}                         % 中图分类号
+\hnuname{江西师范大学}
+\enhnuname{Jiangxi Normal University}
+\hnucode{10414}                     % 学校代码
+\secrettext{公开}                   % 密级
+
+\title{基于大语言模型的虚假新闻检测方法研究}
+\entitle{Research on Fake News Detection Methods Based on Large Language Models}
+\author{（姓名）}
+\enauthor{(Name)}
+\authorid{（学号）}
+\college{（学院）}
+\major{（专业学位类别）}
+\enmajor{(Major)}
+\enbachelor{二〇\ \quad\ 年\quad\ 月}
+\endoctor{Master of Engineering}
+\workon{（专业领域）}
+\supervisor{（导师）}
+\ensupervisor{(Supervisor)}
+\submitdate{二〇\ \ 年\ \ 月\ \ 日}
+\defensedate{二〇\ \ 年\ \ 月\ \ 日}
+\endate{}
+
+% ---------------------------------------------------------------- 本文用到的命令
+% 由脚本生成的表格：只在超出版心宽度时缩小
+\newcommand{\fittable}[1]{\adjustbox{max width=\linewidth}{\input{#1}}}
+\newcommand{\pmstd}[1]{{\scriptsize$\pm$#1}}
+\newcommand{\method}{CLARA}
+\newcommand{\student}{CLARA-D}
+\newcommand{\ours}{CEDAR}
+\DeclareMathOperator{\logit}{logit}
+\DeclareMathOperator{\softplus}{softplus}
+\newcommand{\sg}{\operatorname{sg}}
+\SetKwInput{KwIn}{输入}
+\SetKwInput{KwOut}{输出}
+% 兼容性修复：加载 xeCJK 后，algorithm2e 用 \global\sbox 保存的标题盒子会丢失（算法标题不显示），
+% 这里改用 \global\setbox 重新定义 ruled 样式的标题盒子。
+\makeatletter
+\renewcommand{\algocf@makecaption@ruled}[2]{%
+  \global\setbox\algocf@capbox\hbox{\hskip\AlCapHSkip
+    \setlength{\algocf@lcaptionbox}{\hsize}\addtolength{\algocf@lcaptionbox}{-\AlCapHSkip}%
+    \parbox[t]{\algocf@lcaptionbox}{\algocf@captiontext{#1}{#2}}}}
+\makeatother
+% 算法编号与图表一致（章-序号），标题与编号之间留一个字宽
+\renewcommand{\thealgocf}{\thechapter-\arabic{algocf}}
+\SetAlgoCaptionSeparator{\hspace{0.5em}}
+% 行内含不可断开的公式时，允许多一点伸缩而不是超出版心
+\emergencystretch=1.5em
+% 浮动体尽量靠近引用位置
+\setcounter{topnumber}{3}
+\setcounter{bottomnumber}{2}
+\setcounter{totalnumber}{5}
+
+% 正文中的全部实验数字由脚本从 results/ 生成（见 scripts/make_assets.py），按路径引用
+\input{gen/numbers.tex}
+\IfFileExists{gen/ob_numbers.tex}{\input{gen/ob_numbers.tex}}{}
+
+\begin{document}
+% 封面、原创性声明
+\maketitle
+
+% 摘要
+\input{chapters/abstract}
+% 目录
+\tableofcontents
+
+% 正文章节
+\mainmatter
+\input{chapters/ch1}
+\input{chapters/ch2}
+\input{chapters/ch3}
+\input{chapters/ch4}
+\input{chapters/summary}
+
+\bibliography{refs}
+
+% 附录（按章编号，位于参考文献之后）
+\appendix
+\input{chapters/appendix}
+
+\backmatter
+\input{chapters/acknowledgements}
+\input{chapters/publications}
+
+\end{document}

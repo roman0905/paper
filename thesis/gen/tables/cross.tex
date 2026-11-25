@@ -1,0 +1,12 @@
+\begin{tabular}{lcccccc}
+\toprule
+ & \multicolumn{3}{c}{Weibo21（中文）} & \multicolumn{3}{c}{GossipCop（英文）} \\
+\cmidrule(lr){2-4}\cmidrule(lr){5-7}
+篡改后的文本搭配 & 被改句的声明 & 其余声明 & 整体实例 & 被改句的声明 & 其余声明 & 整体实例 \\
+\midrule
+它自己的分析 & 0.974 & 0.974 & 0.875 & 0.952 & 0.957 & 0.899 \\
+原文的分析（一处与文本不符） & 0.974 & 0.974 & 0.875 & 0.952 & 0.954 & 0.900 \\
+\midrule
+AUC：$r$ $\rightarrow$ 声明是否仍与文本相符 & \multicolumn{3}{c}{0.508} & \multicolumn{3}{c}{0.486} \\
+\bottomrule
+\end{tabular}

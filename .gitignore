@@ -34,3 +34,15 @@ paper/**/*.lot
 .idea/
 .DS_Store
 .claude/
+
+# 学位论文：模板自带的字体与校徽不随仓库分发（见 thesis/README.md），LaTeX 中间文件
+thesis/*.ttf
+thesis/*.ttc
+thesis/figures/Jxnu-logo.png
+thesis/**/*.aux
+thesis/**/*.log
+thesis/**/*.out
+thesis/**/*.toc
+thesis/**/*.bbl
+thesis/**/*.blg
+thesis/missfont.log

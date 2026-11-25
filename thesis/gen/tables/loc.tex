@@ -1,0 +1,22 @@
+\begin{tabular}{llcccc}
+\toprule
+ & & \multicolumn{2}{c}{Weibo21（中文）} & \multicolumn{2}{c}{GossipCop（英文）} \\
+\cmidrule(lr){3-4}\cmidrule(lr){5-6}
+方法 & 单位 & Hit@1 & MRR & Hit@1 & MRR \\
+\midrule
+随机猜测 & 句子 & 30.0 & -- & 19.8 & -- \\
+LLM 怀疑度评分（不训练） & 声明 & 35.7 & 59.2 & 22.8 & 47.1 \\
+BERT + 遮挡归因 & 句子 & 33.2\pmstd{1.2} & 58.4 & 22.2\pmstd{1.0} & 46.5 \\
+LoRA-LLM + 遮挡归因 & 句子 & 38.3\pmstd{1.0} & 61.9 & 24.0\pmstd{1.9} & 48.4 \\
+\method{} & 声明 & 36.2\pmstd{0.8} & 59.6 & 23.2\pmstd{0.6} & 47.0 \\
+\student{} & 句子 & 29.8\pmstd{1.2} & 56.2 & 22.3\pmstd{0.3} & 47.1 \\
+\midrule
+\method{}：耦合式实例打分 & 声明 & 35.0\pmstd{0.7} & 59.0 & 23.8\pmstd{0.5} & 47.4 \\
+\method{}：去掉门控 & 声明 & 35.6\pmstd{0.5} & 59.3 & 23.3\pmstd{0.8} & 47.1 \\
+\method{}：去掉论证文本 & 声明 & 35.4\pmstd{0.7} & 59.2 & 23.4\pmstd{0.6} & 47.1 \\
+\method{}：去掉评分 & 声明 & 35.1\pmstd{0.8} & 59.0 & 22.6\pmstd{0.9} & 46.7 \\
+\method{}：注意力聚合 & 声明 & 35.6\pmstd{0.7} & 59.2 & 21.2\pmstd{0.2} & 46.0 \\
+\student{}：去掉实例级蒸馏 & 句子 & 31.1\pmstd{0.6} & 57.1 & 22.9\pmstd{0.6} & 47.4 \\
+\student{}：无教师 & 句子 & 31.3\pmstd{0.7} & 56.9 & 21.2\pmstd{1.2} & 45.9 \\
+\bottomrule
+\end{tabular}

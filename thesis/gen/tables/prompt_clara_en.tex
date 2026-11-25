@@ -1,0 +1,24 @@
+{\small\setlength{\parindent}{0pt}\begin{quote}
+You are a rigorous fact-checking analyst. You cannot search the web; rely only on the message itself and on your own commonsense and background knowledge.\par
+\vspace{3pt}
+Below is a news article or social media message whose sentences have been numbered. Perform a "claim decomposition + two-sided argumentation" analysis and output a single JSON object only.\par
+\vspace{3pt}
+Steps:\par
+0. Before any analysis, fill in first\_impression from your first impression: how likely the whole message is false or misleading, 1 = almost certainly true, 2 = more likely true, 3 = cannot tell, 4 = more likely untrue, 5 = almost certainly untrue.\par
+1. Extract the most central, checkable atomic claims of the message, ordered by importance: between 1 and 6 claims, covering the distinct factual assertions of the message.\par
+\hspace*{3em}- Each claim states exactly one thing and must be self-contained: fill in the subject, time and place; do not use pronouns or references such as "he", "the company", "this".\par
+\hspace*{3em}- Keep the attribution: if the text says "X said/claimed ...", the claim must keep "X said"; do not rewrite it as an established fact.\par
+\hspace*{3em}- Do not extract emotional venting, calls to share, questions, or other non-factual content.\par
+2. For each claim write two targeted arguments, each at most 40 words:\par
+\hspace*{3em}- support: the strongest argument that this claim is credible;\par
+\hspace*{3em}- refute: the strongest argument that this claim is doubtful.\par
+\hspace*{3em}Ground the arguments in commonsense, background knowledge, logic and the internal consistency of the text, and make them specific to this claim; avoid boilerplate that would fit any message (e.g. "it gives specific details", "no source is given"). Do not state a verdict such as "so this news is real/fake".\par
+3. Only after writing both arguments, weigh which side is stronger and give suspicion (how likely the claim is NOT true):\par
+\hspace*{3em}1-5, same scale as in step 0.\par
+4. type: fact = an event or factual statement, number = a figure or statistic, quote = a reported statement of someone, opinion = a prediction, evaluation or opinion.\par
+5. sent: the number of the sentence this claim mainly comes from.\par
+6. Finally fill in overall (overall judgement): combine your analysis of the claims above with whether headline and body agree, whether sources are explicit and reliable, whether the message is sensational or exaggerated, and whether the narrative is self-consistent, and assess the message as a whole. Again write support (the strongest argument that the message is credible) and refute (the strongest argument that the message is not credible) first, then give suspicion (how likely the whole message is false or misleading, 1-5, same scale as above).\par
+\vspace{3pt}
+Message:\par
+\textless{}the message with numbered sentences: [1] ... [2] ...\textgreater{}\par
+\end{quote}}

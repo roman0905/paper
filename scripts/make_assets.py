@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""results/analysis.json -> LaTeX tables (paper/tables), figures (paper/figures), paper/numbers.tex.
+"""results/analysis.json -> LaTeX tables (<out>/tables), figures (<out>/figures), <out>/numbers.tex.
 
 Nothing here computes a result: every value is read from analysis.json.  Sections that are not
 available yet are skipped with a message.
@@ -22,6 +22,8 @@ NAME = {"bert": "BERT", "lora": "LoRA-LLM", "bert_zs": "BERT+ZS", "arg_gpt": "AR
         "bert_claims": "BERT（只读 LLM 抽取的声明）", "bert_tc": "BERT（只读 topic-content）",
         "clara-no_relevance": r"\method{} 去掉相关性门控"}
 SKIPPED = []
+#: directory that receives tables/, figures/ and numbers.tex (set by --out)
+OUT = os.path.join(ROOT, "paper")
 
 
 def both_sig(cmp, level=0.05):
@@ -67,7 +69,7 @@ def write(path, text):
 
 def table(name, fn, A):
     try:
-        write(os.path.join(ROOT, "paper", "tables", name + ".tex"), fn(A))
+        write(os.path.join(OUT, "tables", name + ".tex"), fn(A))
     except KeyError as e:
         SKIPPED.append("{}: missing {}".format(name, e))
 
@@ -712,15 +714,15 @@ def write_prompts():
     en_msg = "<the message with numbered sentences: [1] ... [2] ...>"
     b = T.build_clara("占位。", "zh", 0)
     text = b["system"] + "\n\n" + b["user"].split("【消息】")[0] + "【消息】\n" + zh_msg
-    write(os.path.join(ROOT, "paper", "tables", "prompt_clara_zh.tex"), prompt_block(text))
+    write(os.path.join(OUT, "tables", "prompt_clara_zh.tex"), prompt_block(text))
     b = T.build_clara("Placeholder.", "en", 0)
     text = b["system"] + "\n\n" + b["user"].split("Message:")[0] + "Message:\n" + en_msg
-    write(os.path.join(ROOT, "paper", "tables", "prompt_clara_en.tex"), prompt_block(text))
+    write(os.path.join(OUT, "tables", "prompt_clara_en.tex"), prompt_block(text))
     text = T.STYLE_SYSTEM["zh"] + "\n\n" + T.STYLE_USER["zh"].format(
         style="〈目标文风：" + T.STYLE_NAME["zh"]["authoritative"] + "；或：" + T.STYLE_NAME["zh"]["sensational"] + "〉", content="〈原文〉")
-    write(os.path.join(ROOT, "paper", "tables", "prompt_style_zh.tex"), prompt_block(text))
+    write(os.path.join(OUT, "tables", "prompt_style_zh.tex"), prompt_block(text))
     text = T.TAMPER_SYSTEM["zh"] + "\n\n" + T.TAMPER_USER["zh"].format(content="〈消息全文〉", sentence="〈被选中的句子〉")
-    write(os.path.join(ROOT, "paper", "tables", "prompt_tamper_zh.tex"), prompt_block(text))
+    write(os.path.join(OUT, "tables", "prompt_tamper_zh.tex"), prompt_block(text))
 
 
 TYPE_ZH = {"fact": "事实", "number": "数字", "quote": "引述", "opinion": "观点", "overall": "整体"}
@@ -901,8 +903,9 @@ def fig_sensitivity(A, path):
 
 def figure(name, fn, A):
     try:
-        fn(A, os.path.join(ROOT, "paper", "figures", name + ".pdf"))
-        print("wrote paper/figures/{}.pdf".format(name))
+        os.makedirs(os.path.join(OUT, "figures"), exist_ok=True)
+        fn(A, os.path.join(OUT, "figures", name + ".pdf"))
+        print("wrote", os.path.relpath(os.path.join(OUT, "figures", name + ".pdf"), ROOT))
     except KeyError as e:
         SKIPPED.append("{}: missing {}".format(name, e))
 
@@ -961,11 +964,17 @@ def write_numbers(A):
                 lines.append("\\expandafter\\def\\csname num@{}@{}\\endcsname{{{}}}".format(tag, key, text))
             n += 1
     lines.append("\\makeatother")
-    write(os.path.join(ROOT, "paper", "numbers.tex"), "\n".join(lines) + "\n")
+    write(os.path.join(OUT, "numbers.tex"), "\n".join(lines) + "\n")
     print("   {} numbers".format(n))
 
 
 def main():
+    global OUT
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--out", default="paper", help="output directory relative to the repository root "
+                                                   "(paper: the article; thesis/gen: the thesis)")
+    OUT = os.path.join(ROOT, ap.parse_args().out)
     with open(os.path.join(ROOT, "results", "analysis.json"), encoding="utf-8") as f:
         A = json.load(f)
     for name, fn in [("data", tab_data), ("main", tab_main), ("ablation", tab_ablation), ("gate", tab_gate),

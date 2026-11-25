@@ -1,0 +1,18 @@
+\begin{tabular}{lcccccc}
+\toprule
+ & \multicolumn{3}{c}{Weibo21（中文）} & \multicolumn{3}{c}{GossipCop（英文）} \\
+\cmidrule(lr){2-4}\cmidrule(lr){5-7}
+方法 & 原文 & 改写后 & $\Delta$ & 原文 & 改写后 & $\Delta$ \\
+\midrule
+BERT & 76.09\pmstd{0.38} & 50.82\pmstd{2.03} & $-$25.27 & 76.66\pmstd{1.34} & 64.76\pmstd{1.72} & $-$11.89 \\
+LoRA-LLM & 79.90\pmstd{1.09} & 60.56\pmstd{1.07} & $-$19.34 & 77.04\pmstd{0.56} & 72.64\pmstd{0.65} & $-$4.40 \\
+BERT+ZS & 77.70\pmstd{0.56} & 52.62\pmstd{1.43} & $-$25.08 & 77.73\pmstd{0.47} & 66.80\pmstd{1.71} & $-$10.92 \\
+ARG & 77.10\pmstd{0.90} & 50.94\pmstd{5.14} & $-$26.16 & 77.17\pmstd{1.04} & 64.91\pmstd{1.26} & $-$12.26 \\
+FactGuard & 75.90\pmstd{0.82} & 53.26\pmstd{4.18} & $-$22.64 & 77.24\pmstd{1.01} & 68.79\pmstd{1.97} & $-$8.45 \\
+\method{} & 77.35\pmstd{0.46} & 53.08\pmstd{2.13} & $-$24.28 & 78.15\pmstd{1.06} & 68.06\pmstd{0.45} & $-$10.09 \\
+\student{} & 75.53\pmstd{0.79} & 50.15\pmstd{1.15} & $-$25.37 & 77.92\pmstd{0.19} & 67.72\pmstd{1.29} & $-$10.20 \\
+\midrule
+BERT（只读 topic-content） & 70.10\pmstd{0.72} & \textbf{61.23}\pmstd{1.05} & $-$8.87 & 77.55\pmstd{0.80} & \textbf{74.24}\pmstd{1.20} & $-$3.31 \\
+BERT（只读 LLM 抽取的声明） & 71.64\pmstd{0.32} & 41.31\pmstd{0.38} & $-$30.33 & 75.14\pmstd{0.76} & 72.36\pmstd{1.17} & $-$2.78 \\
+\bottomrule
+\end{tabular}
