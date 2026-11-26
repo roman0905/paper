@@ -264,8 +264,11 @@ def main():
         flat[k + "/id"] = ids[k]
     np.savez_compressed(pred_path, **flat)
     if selected:
+        # the selected sentences, and the evidence score of every sentence of the test pools
+        scores = {it["id"]: [[c[0], c[1], round(x, 4)] for c, x in main_test["scores"].get(it["id"], {}).items()] for it in test}
         with open(pred_path[:-4] + ".selected.json", "w", encoding="utf-8") as f:
-            json.dump({sp: {it["id"]: c for it, c in zip(splits[sp], sel)} for sp, sel in selected.items()}, f)
+            json.dump({"selected": {sp: {it["id"]: c for it, c in zip(splits[sp], sel)} for sp, sel in selected.items()},
+                       "test_scores": scores}, f)
 
 
 if __name__ == "__main__":

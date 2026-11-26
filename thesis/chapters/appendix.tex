@@ -42,14 +42,14 @@ ARG-D 与 FactGuard-D 的蒸馏权重与学习率取自各自的官方脚本。\
 全部实验在单张 RTX 3090（24\,GB）上完成。生成环境为 vLLM 0.26 与 PyTorch 2.11，训练环境为 PyTorch 2.4、Transformers 4.46 与 PEFT 0.13。
 
 \subsubsection{与官方设置的差异}
-（1）LLM 输出。ARG 官方使用 GPT-3.5 的理由。FactGuard 官方用本地部署的 DeepSeek-R1-Distill-Llama-8B（中文）与 SOLAR-10.7B（英文）抽取 topic-content，要求抽取结果与原文的余弦相似度超过阈值，否则重新抽取；其常识理由沿用 ARG 数据中的 GPT-3.5 理由\citep{he2026factguard}。本文把所有 LLM 输出统一为 Qwen2.5-7B；topic-content 用其官方仓库中的提示一次生成，没有做相似度过滤与重试，这可能对 FactGuard 不利。（2）编码器。FactGuard 官方在中文上使用 bert-base-chinese、英文上使用 RoBERTa，本文为所有方法统一了编码器。（3）FactGuard 的损失。可用性损失以 LLM 判断 $y_{\mathrm{llm}}$ 为目标；当 LLM 未给出明确判断时，本文取目标为 0.5。文本损失中 topic-content 分支的目标按论文公式取标签 $y$。前向计算与官方代码一致，包括其中以 topic-content 代替新闻原文参与交叉注意力的做法。（4）官方脚本只给出单个随机种子的配置，本文为多种子均值。（5）训练时冻结层的输出取自缓存，可训练层使用混合精度（附录~\ref{app:live}）。因此本文复现的数值与原论文不可直接比较，原论文报告的数值见 \ref{sec:main-results} 节。
+（1）LLM 输出。ARG 官方使用 GPT-3.5 的理由。FactGuard 官方用本地部署的 DeepSeek-R1-Distill-Llama-8B（中文）与 SOLAR-10.7B（英文）抽取 topic-content，要求抽取结果与原文的余弦相似度超过阈值，否则重新抽取；其常识理由沿用 ARG 数据中的 GPT-3.5 理由\citep{he2026factguard}。本章把所有 LLM 输出统一为 Qwen2.5-7B；topic-content 用其官方仓库中的提示一次生成，没有做相似度过滤与重试，这可能对 FactGuard 不利。（2）编码器。FactGuard 官方在中文上使用 bert-base-chinese、英文上使用 RoBERTa，本章为所有方法统一了编码器。（3）FactGuard 的损失。可用性损失以 LLM 判断 $y_{\mathrm{llm}}$ 为目标；当 LLM 未给出明确判断时，本章取目标为 0.5。文本损失中 topic-content 分支的目标按论文公式取标签 $y$。前向计算与官方代码一致，包括其中以 topic-content 代替新闻原文参与交叉注意力的做法。（4）官方脚本只给出单个随机种子的配置，本章为多种子均值。（5）训练时冻结层的输出取自缓存，可训练层使用混合精度（附录~\ref{app:live}）。因此本章复现的数值与原论文不可直接比较，原论文报告的数值见 \ref{sec:main-results} 节。
 
 \section{训练协议的核对：冻结层缓存与混合精度}\label{app:live}
 
-为了在单张显卡上完成全部多种子实验，本文的 SLM 类方法在训练时做了两点工程上的改动：冻结的编码器层只前向一次，其输出以半精度缓存；可训练的层用混合精度计算。官方实现每一步都重新计算冻结层，并且全程使用单精度。本附录核对这两点改动是否影响结论。
+为了在单张显卡上完成全部多种子实验，本章的 SLM 类方法在训练时做了两点工程上的改动：冻结的编码器层只前向一次，其输出以半精度缓存；可训练的层用混合精度计算。官方实现每一步都重新计算冻结层，并且全程使用单精度。本附录核对这两点改动是否影响结论。
 
 \subsubsection{三种训练方式}
-表~\ref{tab:live} 在 Weibo21 上用相同的 3 个种子比较三种训练方式：本文的协议（缓存加混合精度）、缓存加全精度，以及每步重新计算冻结层（全精度，与官方实现的计算一致）。缓存本身没有可见的影响：后两种方式在三种方法上的差别都在 0.3 个点以内。本文的协议（缓存加混合精度）单次运行的时间是每步重算的 4\%--10\%。BERT 与 \method{} 在三种方式下没有差别；使用 GPT-3.5 理由的 ARG 在混合精度下比另外两种方式低约 1 个点。
+表~\ref{tab:live} 在 Weibo21 上用相同的 3 个种子比较三种训练方式：本章的协议（缓存加混合精度）、缓存加全精度，以及每步重新计算冻结层（全精度，与官方实现的计算一致）。缓存本身没有可见的影响：后两种方式在三种方法上的差别都在 0.3 个点以内。本章的协议（缓存加混合精度）单次运行的时间是每步重算的 4\%--10\%。BERT 与 \method{} 在三种方式下没有差别；使用 GPT-3.5 理由的 ARG 在混合精度下比另外两种方式低约 1 个点。
 
 \begin{table}[htbp]
 \centering\small
@@ -61,7 +61,7 @@ ARG-D 与 FactGuard-D 的蒸馏权重与学习率取自各自的官方脚本。\
 \subsubsection{主实验配置在全精度下的复核}
 鉴于上表中 ARG 的差别，我们把主实验中各 SLM 类方法被选中的配置在全精度下用同样的 5 个种子重新训练了一遍（表~\ref{tab:fp32}）。在两个数据集、五种方法共十组对比中，没有一组在两种检验下都显著。BERT、BERT+ZS 与 \method{} 在两种精度下的逐种子结果几乎相同，同一种子的平均绝对差不超过 0.2 个点。ARG 与 FactGuard 则不然：同一种子在两种精度下平均相差 0.6--1.2 个点，最大相差 \ptwo{EN/fp32/methods/factguard/abs_diff_max} 个点，早停选中的轮次也多半不同。对这两种方法，改变数值精度的效果相当于换了一个随机种子。均值变化最大的是 GossipCop 上的 FactGuard，全精度下低 \ptwo{EN/derived/factguard_amp_minus_fp32} 个点（$p_{\text{样本}}\peq{EN/fp32/methods/factguard/bootstrap/p}$，$p_{\text{种子}}\peq{EN/fp32/methods/factguard/welch_p}$）。
 
-使用 GPT-3.5 理由、官方学习率的 ARG 是唯一接近显著的配置：5 个种子上混合精度为 \ptwo{CN/official_arg/ours_cached/mean}，全精度为 \ptwo{CN/official_arg/ours_fp32/mean}（$p_{\text{样本}}\peq{CN/official_arg/amp_vs_fp32/bootstrap/p}$，$p_{\text{种子}}\peq{CN/official_arg/amp_vs_fp32/welch_p}$），后者与官方代码的多种子均值（\ptwo{CN/official_arg/mean}）一致。按本文的标准这一差别不算显著，但不能排除混合精度对这一配置略有不利；换成 Qwen2.5-7B 的理由后，同一方法在 Weibo21 上两种精度的均值几乎相同（表~\ref{tab:fp32}）。
+使用 GPT-3.5 理由、官方学习率的 ARG 是唯一接近显著的配置：5 个种子上混合精度为 \ptwo{CN/official_arg/ours_cached/mean}，全精度为 \ptwo{CN/official_arg/ours_fp32/mean}（$p_{\text{样本}}\peq{CN/official_arg/amp_vs_fp32/bootstrap/p}$，$p_{\text{种子}}\peq{CN/official_arg/amp_vs_fp32/welch_p}$），后者与官方代码的多种子均值（\ptwo{CN/official_arg/mean}）一致。按本章的标准这一差别不算显著，但不能排除混合精度对这一配置略有不利；换成 Qwen2.5-7B 的理由后，同一方法在 Weibo21 上两种精度的均值几乎相同（表~\ref{tab:fp32}）。
 
 \begin{table}[htbp]
 \centering\small

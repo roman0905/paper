@@ -1,0 +1,107 @@
+{
+ "config": {
+  "batch_size": 16,
+  "closed": true,
+  "epochs": 4,
+  "ev_weight": 0.0,
+  "grad_checkpoint": false,
+  "lr": 0.0001,
+  "m": 16,
+  "max_tokens": 1100,
+  "no_claim": false,
+  "perturb_n": 0,
+  "pool": 48,
+  "rank": 16,
+  "ranker": "bm25",
+  "select": false,
+  "swap_rate": 0.0,
+  "train_limit": 0,
+  "train_sample": false
+ },
+ "cost": {
+  "queries": 1.0,
+  "tokens": 98.535
+ },
+ "dataset": "RAWFC",
+ "encoder": "Qwen2.5-7B-Instruct",
+ "extra": {},
+ "history": [
+  {
+   "epoch": 0,
+   "loss": 1.527082589438772,
+   "loss_ev": 0.0,
+   "n_train": 1612,
+   "val": 0.45442176870748296
+  },
+  {
+   "epoch": 1,
+   "loss": 0.7629713194985543,
+   "loss_ev": 0.0,
+   "n_train": 1612,
+   "val": 0.4878158315088976
+  },
+  {
+   "epoch": 2,
+   "loss": 0.28922282751984996,
+   "loss_ev": 0.0,
+   "n_train": 1612,
+   "val": 0.5128163663432415
+  },
+  {
+   "epoch": 3,
+   "loss": 0.10871161863981235,
+   "loss_ev": 0.0,
+   "n_train": 1612,
+   "val": 0.5008088449728098
+  }
+ ],
+ "max_memory_gb": 19.354112148284912,
+ "method": "lora-closed",
+ "metrics": {
+  "test": {
+   "acc": 0.515,
+   "conf": 0.8354699163473494,
+   "ece": 0.32253055584997553,
+   "f1_0": 0.578512396694215,
+   "f1_1": 0.5058823529411764,
+   "f1_2": 0.4587155963302752,
+   "f1_h": 0.5318216099562142,
+   "macf1": 0.5143701153218888,
+   "macp": 0.5496924865856904,
+   "macr": 0.5150761344791195,
+   "mae": 0.55
+  },
+  "val": {
+   "acc": 0.51,
+   "conf": 0.847365989068902,
+   "ece": 0.33736598906890203,
+   "f1_0": 0.5116279069767442,
+   "f1_1": 0.47682119205298007,
+   "f1_2": 0.55,
+   "f1_h": 0.5173693367626426,
+   "macf1": 0.5128163663432415,
+   "macp": 0.5250074872716382,
+   "macr": 0.509950248756219,
+   "mae": 0.585
+  }
+ },
+ "n_eval": {
+  "test": 200,
+  "val": 200
+ },
+ "n_items": {
+  "test": 200,
+  "train": 1612,
+  "val": 200
+ },
+ "n_trainable": 40370176,
+ "name": "lora-closed",
+ "protocol": "strict",
+ "seconds": 546.8525884151459,
+ "seed": 4,
+ "summary": {
+  "best_epoch": 2,
+  "epochs_run": 4,
+  "train_seconds": 531.1949560642242
+ }
+}

@@ -36,6 +36,9 @@ class Verifier:
         self.tok.padding_side = "left"
         if self.tok.pad_token_id is None:
             self.tok.pad_token = self.tok.eos_token
+        # models with an optional reasoning phase (Qwen3) must answer directly: the class
+        # distribution is read at the first position after the prompt
+        self.chat_kwargs = {"enable_thinking": False} if "enable_thinking" in (self.tok.chat_template or "") else {}
         if model is None:
             dtype = torch.bfloat16 if device.startswith("cuda") else torch.float32
             model = AutoModelForCausalLM.from_pretrained(model_path, torch_dtype=dtype, device_map={"": device})
@@ -75,7 +78,8 @@ class Verifier:
         if ev is not None and n_evidence is not None:
             ev = ev[:n_evidence]
         msgs = verifier_prompt(ex["claim"], ev, self.options)
-        return self.tok.apply_chat_template(msgs, tokenize=False, add_generation_prompt=True), msgs[-1]["content"], ev
+        text = self.tok.apply_chat_template(msgs, tokenize=False, add_generation_prompt=True, **self.chat_kwargs)
+        return text, msgs[-1]["content"], ev
 
     def _encode_one(self, ex: Example, n: Optional[int]) -> Encoded:
         text, user, ev = self._render(ex, n)

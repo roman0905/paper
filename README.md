@@ -1,14 +1,11 @@
-# CLARA: Claim-Level Argument Reliability Adjudication
+# 基于大语言模型的虚假新闻检测：闭卷裁决与证据驱动验证
 
-面向闭卷（不检索外部证据）、纯文本虚假新闻检测的 LLM+SLM 协同框架，以及一套受控的多种子评测流程。
+本仓库是一篇硕士学位论文的全部代码、实验结果与论文源文件，包含先后两部分工作：
 
-冻结的 LLM 把新闻拆成若干原子 claim，并为每个 claim 同时写出"最强支持论证"和"最强质疑论证"，给出怀疑度评分。可训练的小模型（裁决器）逐个实例决定是否采用 LLM 的分析：
+1. **闭卷检测（`clara/`）**：只看新闻文本、不检索外部证据。提出声明级论证裁决方法 CLARA，并设计了一套受控的多种子评测流程。结论以负面发现为主：闭卷检测器主要依赖文风（见文末）。
+2. **开卷验证（`openbook/`）**：在 RAWFC 与 LIAR-RAW 上，利用数据集自带的原始报道作为证据验证声明。包括对证据来源的泄漏审计、两种证据协议，以及证据自筛选验证方法 SIEVE（LoRA 微调的 LLM 在同一次前向计算中给证据句打分并判断真伪，训练时混入错配证据，推理时先读、再选、后判）。
 
-- **相关性门控**判断一个分析单元是否真的属于这条新闻；不属于的单元变成不携带证据的"空实例"。门控全部为零时，预测精确退回到只看新闻文本的分支（实际的门控是软的，见文末）。
-- **判定门控**调节 LLM 证据的权重。
-- 实例经 noisy-OR 多示例学习（MIL）聚合为新闻级判定，训练只需要新闻级标签。
-
-论文与全部结果见 `paper/` 与 `results/`。结论并不都是正面的，README 末尾有简要说明。
+学位论文（江西师范大学硕士学位论文模板）在 `thesis/`；闭卷部分另有一份文章体例的稿件在 `paper/`。
 
 ## 目录结构
 
@@ -48,9 +45,20 @@ scripts/
   aggregate.py        快速查看 mean ± std
   llm_only.py         免训练的 LLM 基线
   dev/                只使用训练集抽样与验证集的开发诊断
-tests/test_smoke.py   合成数据上的端到端测试
-paper/                论文 LaTeX 源文件
-results/              每次运行的指标（runs/）与汇总（analysis.json）
+openbook/             开卷部分
+  data.py             RAWFC / LIAR-RAW 的规范化、报道的泄漏标记、两种证据协议
+  retrieval.py        候选句池与 BM25 第一阶段排序
+  prompts.py          验证器的提示词
+  verifier.py         LLM 验证器（选项字母读出、LoRA、证据打分头）与训练循环
+  views.py            训练/测试查询的构造：证据重采样、错配证据、各种证据受控条件
+  pipeline.py         单遍推理、读—选—判推理与证据打分头的诊断指标
+  metrics.py          多分类指标与配对 bootstrap
+  report.py           读取结果、方法间比较
+scripts/ob_*.py|sh    开卷部分的数据准备、训练评测、流水线、汇总与制表
+tests/                合成数据上的端到端测试（test_smoke.py 闭卷，test_openbook.py 开卷）
+paper/                闭卷部分的文章稿（LaTeX）
+thesis/               学位论文（LaTeX，见 thesis/README.md）
+results/              每次运行的指标与汇总：results/analysis.json（闭卷），results/ob/（开卷）
 ```
 
 ## 环境
@@ -71,7 +79,7 @@ results/              每次运行的指标（runs/）与汇总（analysis.json�
 - `data/ARG-CN`（Weibo21）、`data/ARG-EN`（GossipCop）：ARG 论文发布的按时间划分的数据，需向原作者申请，**本仓库不包含也不得再分发**。
 - LLM 生成的缓存、合并后的数据集文件、逐样本预测由上述数据派生，同样不入库（见 `.gitignore`）。入库的 `results/` 只含汇总指标与配置。
 
-## 复现流程
+## 闭卷部分的复现流程
 
 ```bash
 # 1. 离线生成（单卡 3090，Qwen2.5-7B-Instruct，约 2 小时）
@@ -105,7 +113,23 @@ python scripts/analyze.py && python scripts/make_assets.py && make -C paper
 python -m pytest tests -q
 ```
 
-## 评测协议
+## 开卷部分的复现流程
+
+```bash
+# 1. 规范化数据并计算 BM25 排序（约 1.5 分钟；数据放在 data/RAWFC、data/LIAR-RAW）
+python -I scripts/ob_prepare.py RAWFC data/RAWFC
+python -I scripts/ob_prepare.py LIAR-RAW data/LIAR-RAW
+
+# 2. 全部实验（分阶段、可续跑；单卡 3090 约 4 天）
+bash scripts/ob_pipeline.sh rawfc_main liar_main ablation all_protocol
+
+# 3. 汇总、制表作图、编译学位论文
+python scripts/ob_analyze.py && python scripts/ob_assets.py && make -C thesis
+```
+
+RAWFC 与 LIAR-RAW 由其作者公开发布（Yang et al., COLING 2022），本仓库不包含数据。数据集自带的事实核查结论文本与银标证据标签只用作训练信号，不进入任何测试输入。
+
+## 评测协议（闭卷部分）
 
 所有基于 SLM 的方法共用同一协议（沿用 ARG 官方实现）：编码器只微调最后一层；batch size 64；最多 50 轮；按验证集 macro-F1 早停（patience 5）；判定阈值固定为 0.5；测试集只在选定的 checkpoint 上评一次。在此基础上：
 
@@ -117,7 +141,7 @@ python -m pytest tests -q
 
 冻结层只前向一次并缓存（`clara/encoder.py`），可训练的最后一层用混合精度计算（`scripts/run.py --amp`，主实验的协议）。不带 `--amp` 为全精度；`--live` 关闭缓存、每步重算冻结层，与官方实现的计算一致。论文附录 C 用后两种方式复核了主实验：定性结论不变，但 ARG 与 FactGuard 的数值对精度敏感，1 个点左右的差异会随之出现或消失。
 
-## 需要事先知道的结论
+## 闭卷部分：需要事先知道的结论
 
 结果并不都支持最初的设想（macro-F1，Weibo21 / GossipCop，5 个种子）：
 
