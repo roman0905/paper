@@ -98,25 +98,47 @@ def with_foreign(item: Dict[str, Any], other: Dict[str, Any], ranked_own: Ranked
     return virtual, ranked
 
 
+def nearest_claims(items: Sequence[Dict[str, Any]], universe: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """For every item, the claim of ``universe`` whose text is most similar to it (BM25 over the
+    claim texts; the item itself and verbatim duplicates are excluded)."""
+    from openbook.retrieval import bm25_scores, terms
+
+    docs = [terms(u["claim"]) for u in universe]
+    out = []
+    for it in items:
+        scores = bm25_scores(terms(it["claim"]), docs)
+        for j, u in enumerate(universe):
+            if u["id"] == it["id"] or u["claim"] == it["claim"]:
+                scores[j] = -1.0
+        out.append(universe[int(np.argmax(scores))])
+    return out
+
+
 def perturb(items: Sequence[Dict[str, Any]], ranking: Dict[str, Ranked], kind: str, m: int, top: int,
-            seed: int = 0) -> Tuple[List[Dict[str, Any]], Dict[str, Ranked]]:
+            seed: int = 0, universe: Optional[Sequence[Dict[str, Any]]] = None) -> Tuple[List[Dict[str, Any]], Dict[str, Ranked]]:
     """Test-time evidence perturbations (labels never change):
 
-    ``swap``     the whole pool comes from another claim of the split: retrieval returned material
-                 that is not about the claim
-    ``mix``      half of the pool is the claim's own, half comes from another claim
-    ``droptop``  the first-stage top-``m`` sentences are missing: weak retrieval
+    ``swap``      the whole pool comes from a random other claim: retrieval returned material that
+                  is not about the claim
+    ``nearswap``  the whole pool comes from the most similar other claim of ``universe`` (default:
+                  ``items``): material about a related but different claim
+    ``mix``       half of the pool is the claim's own, half comes from a random other claim
+    ``droptop``   the first-stage top-``m`` sentences are missing: weak retrieval
     """
     pool = max(top, m)
     if kind == "droptop":
         return list(items), {it["id"]: ranking.get(it["id"], [])[m:] for it in items}
-    if kind not in ("swap", "mix"):
+    if kind not in ("swap", "mix", "nearswap"):
         raise ValueError(kind)
-    perm = derangement(len(items), seed)
+    if kind == "nearswap":
+        others = nearest_claims(items, universe if universe is not None else items)
+    else:
+        perm = derangement(len(items), seed)
+        others = [items[int(perm[i])] for i in range(len(items))]
     out_items, out_rank = [], {}
     for i, it in enumerate(items):
-        other = items[int(perm[i])]
-        n_own = 0 if kind == "swap" else pool // 2
+        other = others[i]
+        n_own = 0 if kind in ("swap", "nearswap") else pool // 2
         v, r = with_foreign(it, other, ranking.get(it["id"], []), ranking.get(other["id"], []), n_own, pool - n_own)
         out_items.append(v)
         out_rank[it["id"]] = r

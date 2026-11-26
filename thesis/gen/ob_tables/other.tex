@@ -1,0 +1,13 @@
+\begin{tabular}{llp{4.6cm}cccc}
+\toprule
+方法 & 骨干模型 & 证据来源 & \multicolumn{2}{c}{RAWFC} & \multicolumn{2}{c}{LIAR / LIAR-RAW} \\
+ & & & F1 & 口径 & F1 & 口径 \\
+\midrule
+FactLLaMA\citep{cheung2023factllama} & LLaMA-7B (LoRA) & 在线搜索（Google）；LIAR 的声明 & 55.65 & 宏平均 & 30.44 & 宏平均 \\
+HiSS\citep{zhang2023hiss} & GPT-3.5 (text-davinci-003) & 在线搜索（Google）；LIAR 的声明 & 53.90 & 调和 & 37.50 & 调和 \\
+RAFTS\citep{yue2024rafts} & GPT-3.5 & 维基百科；LIAR 的声明 & 57.30 & 调和 & 42.00 & 调和 \\
+EVICheck\citep{wang2025evicheck} & GPT-4 + Llama-3-8B (LoRA) & 在线搜索 & 63.30 & 宏平均 & -- & -- \\
+REFLEX\citep{kong2026reflex} & LLaMA-2-7B & 推理时无证据；以核查结论文本为训练目标 & 64.99 & 宏平均 & -- & -- \\
+LoRA 读证据句\citep{kumar2025entailed} & Qwen2.5-7B (LoRA) & 数据集的证据句 & 66.00 & 宏平均 & 29.00 & 宏平均 \\
+\bottomrule
+\end{tabular}

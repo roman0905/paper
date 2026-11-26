@@ -15,7 +15,8 @@ procedure to a changed evidence pool, or change the procedure:
 
     test@<protocol>   evidence pool of the other protocol
     test@closed       no evidence at all
-    test@swap         the whole pool comes from another claim
+    test@swap         the whole pool comes from a random other claim
+    test@nearswap     the whole pool comes from the most similar other test claim
     test@halfswap     half of the pool comes from another claim
     test@droptop      the first-stage top-m sentences are missing
     test@oracle       upper bound, not a legitimate condition: evidence chosen with the test claims'
@@ -48,7 +49,7 @@ from openbook.data import PROTOCOLS, Corpus  # noqa: E402
 from openbook.metrics import classification_metrics  # noqa: E402
 from openbook.verifier import Verifier, fit  # noqa: E402
 
-PERTURBATIONS = ("swap", "halfswap", "droptop")
+PERTURBATIONS = ("swap", "nearswap", "halfswap", "droptop")
 
 
 def run_name(args):
@@ -207,7 +208,8 @@ def main():
             sub = [test[i] for i in keep]
         perturbed = {}
         for kind in PERTURBATIONS:
-            items_p, rank_p = V.perturb(sub, own_rank, {"halfswap": "mix"}.get(kind, kind), args.m, args.pool, seed=0)
+            items_p, rank_p = V.perturb(sub, own_rank, {"halfswap": "mix"}.get(kind, kind), args.m, args.pool, seed=0,
+                                        universe=test)
             res = infer(items_p, rank_p)
             put("test@" + kind, res["prob"], sub)
             perturbed[kind] = (items_p, res)
@@ -218,6 +220,9 @@ def main():
         # under fully mismatched evidence: does the verdict follow the claim the evidence belongs to?
         source = labels(sub)[V.derangement(len(sub), 0)]
         extra["swap_acc_source_label"] = float((perturbed["swap"][1]["prob"].argmax(1) == source).mean())
+        near = labels(V.nearest_claims(sub, test))
+        extra["nearswap_acc_source_label"] = float((perturbed["nearswap"][1]["prob"].argmax(1) == near).mean())
+        extra["nearswap_same_label"] = float((near == labels(sub)).mean())
         if args.ev_weight > 0:
             extra.update(P.evidence_diagnostics(test, own_rank, args.m, main_test, perturbed, args.select))
     if args.transfer:

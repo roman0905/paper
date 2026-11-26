@@ -121,6 +121,14 @@ def test_perturbations(corpus, ranking):
         assert sum(flags) == 5 and flags[:4] == [False, True, False, True]            # interleaved by rank
     ex = V.standard(mx_items, mx_rank, 6)[0]
     assert len(ex["evidence"]) == 6 and sum(V.is_foreign(mx_items[0], c) for c in ex["cands"]) == 3
+    near = V.nearest_claims(items, items)
+    assert all(n["id"] != it["id"] for n, it in zip(near, items))
+    # the synthetic claims of one topic share their wording: the nearest claim has the same topic
+    topic = lambda it: it["claim"].split(" happened")[0]   # noqa: E731
+    repeated = [k for k, it in enumerate(items) if sum(topic(o) == topic(it) for o in items) > 1]
+    assert len(repeated) == 6 and all(topic(near[k]) == topic(items[k]) for k in repeated)
+    ns_items, ns_rank = V.perturb(items[:3], r, "nearswap", 5, 10, universe=items)
+    assert all(V.is_foreign(it, (a, b)) for it in ns_items for a, b, _ in ns_rank[it["id"]]) and len(ns_items) == 3
     dt_items, dt_rank = V.perturb(items, r, "droptop", 5, 10)
     assert all(dt_rank[it["id"]] == r[it["id"]][5:] for it in items) and dt_items == list(items)
 
@@ -221,11 +229,12 @@ def test_training_and_two_pass(tiny, corpus, ranking):
         run = (lambda items, rk: P.read_select_verify(v, items, rk, 5, 10, 3, batch=4)) if select else \
               (lambda items, rk: P.single_pass(v, V.standard(items, rk, 5), 3, batch=4))
         pert = {}
-        for kind in ("swap", "halfswap"):
+        for kind in ("swap", "nearswap", "halfswap"):
             items_p, rank_p = V.perturb(val, r, {"halfswap": "mix"}.get(kind, kind), 5, 10, seed=0)
             pert[kind] = (items_p, run(items_p, rank_p))
         d = P.evidence_diagnostics(val, r, 5, run(val, r), pert, select)
-        assert all(0.0 <= d[k] <= 1.0 for k in ("auc_silver", "silver_p_pool", "silver_p_bm25", "auc_own_vs_foreign", "auc_usable"))
+        assert all(0.0 <= d[k] <= 1.0 for k in ("auc_silver", "silver_p_pool", "silver_p_bm25", "auc_own_vs_foreign", "auc_usable",
+                                                  "auc_usable_near"))
         assert ("halfswap_foreign_sel" in d) == select == ("silver_p_selected" in d)
         assert len(P.score_maps(val, run(val, r))[0]) == (10 if select else 5)
     # restoring a state reproduces predictions

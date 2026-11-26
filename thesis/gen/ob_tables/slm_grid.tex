@@ -1,0 +1,12 @@
+\begin{tabular}{llcccc}
+\toprule
+ & & \multicolumn{2}{c}{RAWFC} & \multicolumn{2}{c}{LIAR-RAW} \\
+\cmidrule(lr){3-4}\cmidrule(lr){5-6}
+输入 & 学习率 & 验证 & 测试 & 验证 & 测试 \\
+\midrule
+仅声明 & $1\times10^{-5}$ & \textbf{41.34}\pmstd{12.17} & 41.77\pmstd{11.82} & -- & -- \\
+仅声明 & $2\times10^{-5}$ & -- & -- & -- & -- \\
+声明 + 证据 & $1\times10^{-5}$ & \textbf{56.29}\pmstd{0.69} & 59.74\pmstd{2.01} & -- & -- \\
+声明 + 证据 & $2\times10^{-5}$ & -- & -- & -- & -- \\
+\bottomrule
+\end{tabular}

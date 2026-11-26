@@ -133,3 +133,42 @@ ARG-D 与 FactGuard-D 的蒸馏权重与学习率取自各自的官方脚本。\
 两条样例反映了正文中的几点观察。其一，两条篡改后的新闻都没有被判为假（$\hat y$ 接近 0），与表~\ref{tab:tamper} 一致。其二，对应被改句子的声明在各条声明中 $p_k$ 最高，定位是对的，但数值本身远低于 0.5。其三，7B 模型写出的论证质量不稳定：样例 1 中“支持”一栏写的其实是质疑；样例 2 中对应第 3 句的声明，其质疑论证称“具体日期和发言人姓名未明确提及”，而原文两者都有。这条与文本不符的论证并没有被相关性门控关闭：两条样例中所有声明的 $r_k$ 都接近 1。样例 2 的整体实例 $r_0$ 较低（0.40），从单个样例无法判断其原因。
 
 \input{gen/tables/cases.tex}
+
+\chapter{第~\ref{ch:openbook}~章的实现细节}\label{app:ob}
+
+\section{验证器的提示词}\label{app:ob-prompt}
+
+下面是验证器的系统提示与用户提示，以 RAWFC 的三个等级为例；LIAR-RAW 的选项为六个等级（A 至 F）。闭卷的 LoRA-LLM 与零样本基线使用同样的选择题，但没有证据部分，系统提示相应地改为“只给出声明、没有证据”。
+
+\input{gen/ob_tables/prompt_verifier.tex}
+
+\section{实现细节}\label{app:ob-impl}
+
+\subsubsection{报道的标记规则}
+\ref{sec:ob-audit}~节的五种标记原因按下列规则判断，前四种只看网址。（1）标签来源的核查机构：域名为 snopes.com 或 politifact.com（含子域名）。（2）其他事实核查网站与聚合页：factcheck.org、truthorfiction.com、leadstories.com、checkyourfact.com、fullfact.org、factcheck.afp.com、hoax-slayer.com/net、mediabiasfactcheck.com、rssing.com 等。（3）代码与数据托管站点：github.com、githubusercontent.com、kaggle.com、huggingface.co、paperswithcode.com、gitlab.com、rpubs.com、data.world 等。（4）事实核查栏目：不属于前三类，且网址中含有 fact-check、factcheck、debunk、hoax、pinocchio、truth-o-meter 等字样。（5）正文提及事实核查：报道的任一句子匹配 fact check、fact-checking、Snopes、PolitiFact、pants on fire、truth-o-meter、debunk、Pinocchio 等词。完整的正则表达式见代码仓库中的 \texttt{openbook/data.py}。
+
+\subsubsection{文本预处理与检索}
+数据集发布的报道是分词并做过词形还原的文本，我们只还原了标点前后的空格与引号，没有改动词形。BM25 的参数取 $k_1=1.2$、$b=0.75$；检索用的词项为小写化、去停用词并经 Porter 词干提取后的词。证据句超过 60 个词的部分在提示中被截断。
+
+\subsubsection{训练}
+优化器为 AdamW，权重衰减为 0，梯度裁剪阈值 1.0，预热步数占总步数的 6\%。带证据的输入约含 840 个词元，每步的微批大小为 2，累积 8 步更新一次；闭卷输入的微批大小为 4，累积 4 步。打分头的偏置初始化为 $-1$，权重初始化为 0。RoBERTa-large 使用 AdamW（权重衰减 0.01）、批大小 16 与混合精度。训练环境与第~\ref{ch:clara}~章相同。
+
+\section{RoBERTa-large 的学习率选择}
+
+\begin{table}[htbp]
+\centering\small
+\caption{RoBERTa-large 在两个学习率下的验证集与测试集 macro-F1（\%）}\label{tab:ob-slm-grid}
+\fittable{gen/ob_tables/slm_grid.tex}
+\note{多个随机种子的均值与标准差；加粗的验证集数值对应被选中的配置。}
+\end{table}
+
+\section{使用其他证据来源的已发表结果}
+
+表~\ref{tab:ob-other} 列出在同样的声明上、但使用其他证据来源的工作所报告的数值。它们的证据或来自在线搜索引擎，或来自维基百科，或在训练中使用了核查结论文本，与正文表~\ref{tab:ob-main} 中使用数据集原始报道的方法不可直接比较，仅供参考。
+
+\begin{table}[htbp]
+\centering\small
+\caption{使用其他证据来源的工作在两个数据集的声明上报告的 F1（\%）}\label{tab:ob-other}
+\fittable{gen/ob_tables/other.tex}
+\note{数值取自各论文；“口径”一列说明其 F1 是各类别 F1 的平均（宏平均），还是宏平均精确率与召回率的调和平均。“LIAR / LIAR-RAW”一列中，使用在线搜索或维基百科的工作评测的是 LIAR 的声明（与 LIAR-RAW 的声明相同）。}
+\end{table}

@@ -98,9 +98,12 @@ def evidence_diagnostics(items: Sequence[Dict[str, Any]], ranking: Dict[str, V.R
                                                      for it, sel in zip(items_h, res_h["selected"]) if sel]))
     top = lambda s: float(np.mean(sorted(s.values(), reverse=True)[:m])) if s else 0.0   # noqa: E731
     own_top = [top(s) for s in maps]
-    swap_top = [top(s) for s in score_maps(perturbed["swap"][0], perturbed["swap"][1])]
-    out["usable_own_mean"], out["usable_swap_mean"] = float(np.mean(own_top)), float(np.mean(swap_top))
-    out["auc_usable"] = score_auc(own_top, swap_top)
+    out["usable_own_mean"] = float(np.mean(own_top))
+    for kind, key in (("swap", "usable"), ("nearswap", "usable_near")):
+        if kind in perturbed:
+            other_top = [top(s) for s in score_maps(perturbed[kind][0], perturbed[kind][1])]
+            out[key + "_swap_mean" if kind == "swap" else key + "_mean"] = float(np.mean(other_top))
+            out["auc_" + key] = score_auc(own_top, other_top)
     return out
 
 

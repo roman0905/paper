@@ -1,0 +1,56 @@
+% Framework figure of the open-book method (TikZ); natural width ~180 mm, scaled to \linewidth.
+% Blue = the verifier (one LoRA-tuned LLM, used in both passes), green = selection,
+% orange = what exists only during training.
+\definecolor{cLLM}{HTML}{EB6834}
+\definecolor{cSLM}{HTML}{2A78D6}
+\definecolor{cGate}{HTML}{1BAF7A}
+\definecolor{cInk}{HTML}{0B0B0B}
+\definecolor{cMuted}{HTML}{6B6A66}
+\definecolor{cLine}{HTML}{C3C2B7}
+\begin{tikzpicture}[
+  x=1mm, y=1mm, font=\footnotesize, >={Stealth[length=1.6mm]},
+  box/.style={draw=cLine, rounded corners=2pt, fill=white, align=center, inner sep=2.5pt, text=cInk},
+  ver/.style={box, draw=cSLM!80, fill=cSLM!7},
+  sel/.style={box, draw=cGate!90, fill=cGate!9},
+  trn/.style={box, draw=cLLM!80, fill=cLLM!6, align=left},
+  flow/.style={->, draw=cMuted, line width=0.5pt},
+  sup/.style={->, draw=cMuted, dashed, line width=0.5pt},
+  lab/.style={font=\scriptsize, text=cMuted, inner sep=1.5pt}]
+
+% ---------------- inference: retrieve, read, select, verify
+\node[box, minimum width=24mm] (c) at (12,0) {声明 $c$\\[-1pt]{\scriptsize 原始报道 $\mathcal D_c$}};
+\node[box, minimum width=30mm] (pool) at (46,0) {候选池 $\mathcal P_c$\\[-1pt]{\scriptsize 协议过滤、去重}\\[-1pt]{\scriptsize BM25 取前 $K$ 句}};
+\node[ver, minimum width=40mm] (read) at (88,0) {\textbf{读}：验证器 $f_\theta$\\[-1pt]{\scriptsize 每次读 $m$ 句，共 $\lceil K/m\rceil$ 次}\\[-1pt]{\scriptsize 句末隐状态 $\to$ 证据得分 $u(s)$}};
+\node[sel, minimum width=28mm] (sel) at (128,0) {\textbf{选}\\[-1pt]{\scriptsize 得分最高的}\\[-1pt]{\scriptsize $m$ 句 $E^{*}$}};
+\node[ver, minimum width=40mm] (ver) at (168,0) {\textbf{判}：验证器 $f_\theta$\\[-1pt]{\scriptsize 读入 $c$ 与 $E^{*}$}\\[-1pt]{\scriptsize 选项字母的 logit $\to p_\theta(y\mid c,E^{*})$}};
+\draw[flow] (c) -- (pool);
+\draw[flow] (pool) -- (read);
+\draw[flow] (read) -- (sel);
+\draw[flow] (sel) -- (ver);
+
+% ---------------- outputs
+\node[box, minimum width=34mm] (use) at (128,-23) {可用性得分 $a(c)$\\[-1pt]{\scriptsize $E^{*}$ 上证据得分的均值}};
+\node[box, minimum width=22mm] (out) at (176,-23) {真实性等级 $\hat y$};
+\draw[flow] (sel) -- (use);
+\draw[flow] ([xshift=8mm]ver.south) -- (out.north);
+
+% ---------------- training only
+\node[trn, minimum width=62mm] (train) at (33,-47) {%
+  {\scriptsize \textbf{训练查询的证据 $E$}（每轮重新构造）}\\[-1pt]
+  {\scriptsize 重采样：从 $\mathcal P_c$ 按名次加权抽取 $m$ 句}\\[-1pt]
+  {\scriptsize 错配：以概率 $\rho$ 换成另一条声明的候选句}};
+\node[trn, minimum width=48mm] (lev) at (93,-47) {%
+  {\scriptsize $\lambda_{\mathrm{ev}}\,\overline{\mathrm{BCE}}\big(u_i,\,z(e_i)\big)$}\\[-1pt]
+  {\scriptsize $z$：银标证据标签}\\[-1pt]
+  {\scriptsize 错配时全为 0}};
+\node[trn, minimum width=56mm] (lce) at (152,-47) {%
+  {\scriptsize $\mathrm{CE}\big(p_\theta(\cdot\mid c,E),\,y\big)$}\\[-1pt]
+  {\scriptsize $y$：真实性等级标签}\\[-1pt]
+  {\scriptsize 错配时仍为本声明的标签}};
+\draw[sup] ([xshift=-5mm]lev.north) -- ([xshift=0mm]read.south);
+\draw[sup] ([xshift=0mm]lce.north) -- ([xshift=-16mm]ver.south);
+\begin{scope}[on background layer]
+  \node[draw=cLine, dashed, rounded corners=3pt, inner sep=3pt, fit=(train)(lev)(lce)] (plate) {};
+\end{scope}
+\node[lab, anchor=south west] at ([xshift=1mm,yshift=0.3mm]plate.north west) {仅在训练时};
+\end{tikzpicture}

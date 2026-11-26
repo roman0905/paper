@@ -41,6 +41,10 @@ def main():
     ap.add_argument("--epochs", type=int, default=6)
     ap.add_argument("--batch", type=int, default=16)
     ap.add_argument("--max-len", type=int, default=512)
+    ap.add_argument("--pool", type=int, default=48, help="size of the perturbed evidence pools (as in ob_verifier.py)")
+    ap.add_argument("--perturb-n", type=int, default=None,
+                    help="perturbed-evidence conditions on a fixed random subset of N test claims "
+                         "(default: 400 on LIAR-RAW as for the LLM verifiers, all claims on RAWFC)")
     ap.add_argument("--name", default=None)
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--force", action="store_true")
@@ -71,17 +75,26 @@ def main():
     def encode(examples):
         claims = [ex["claim"] for ex in examples]
         if examples and examples[0]["evidence"] is None:
-            return tok(claims, truncation=True, max_length=args.max_len)
+            return dict(tok(claims, truncation=True, max_length=args.max_len))
         ev = [" ".join(s for _, s in ex["evidence"]) or "no evidence" for ex in examples]
-        return tok(claims, ev, truncation="only_second", max_length=args.max_len)
+        return dict(tok(claims, ev, truncation="only_second", max_length=args.max_len))
 
     def view(split, protocol=args.protocol):
         return V.closed(splits[split]) if args.closed else V.standard(splits[split], rank[protocol], args.m)
 
     conditions = {"val": view("val"), "test": view("test")}
     if not args.closed:
+        test = splits["test"]
         conditions["test@" + other] = view("test", other)
-        conditions["test@swap"] = V.swapped(splits["test"], rank[args.protocol], args.m, seed=0)
+        conditions["test@closed"] = V.closed(test)
+        n_sub = args.perturb_n if args.perturb_n is not None else (400 if args.dataset == "LIAR-RAW" else 0)
+        sub = test
+        if n_sub and n_sub < len(test):
+            sub = [test[i] for i in sorted(np.random.RandomState(0).permutation(len(test))[:n_sub])]
+        for kind in ("swap", "nearswap", "halfswap", "droptop"):       # the conditions of ob_verifier.py
+            items_p, rank_p = V.perturb(sub, rank[args.protocol], {"halfswap": "mix"}.get(kind, kind), args.m, args.pool,
+                                        seed=0, universe=test)
+            conditions["test@" + kind] = V.standard(items_p, rank_p, args.m)
     enc = {k: encode(v) for k, v in conditions.items()}
     y = {k: np.array([ex["label"] for ex in v]) for k, v in conditions.items()}
     train = view("train")
