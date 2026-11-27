@@ -20,14 +20,17 @@ def load_runs(tag: str) -> Runs:
     out: Runs = {}
     for path in sorted(glob.glob(os.path.join(ROOT, "results", "ob", "runs", tag, "*", "s*.json"))):
         name = os.path.basename(os.path.dirname(path))
+        if not os.path.basename(path)[1:-5].isdigit():       # e.g. s1.reeval.json: a re-evaluation, kept apart
+            continue
         seed = int(os.path.basename(path)[1:-5])
         with open(path, encoding="utf-8") as f:
             out.setdefault(name, {})[seed] = json.load(f)
     return out
 
 
-def load_preds(tag: str, name: str, seed: int) -> Optional[Dict[str, np.ndarray]]:
-    path = os.path.join(ROOT, "outputs", "ob", "runs", tag, name, "s{}.npz".format(seed))
+def load_preds(tag: str, name: str, seed: int, reeval: bool = False) -> Optional[Dict[str, np.ndarray]]:
+    """Stored predictions of a run (``reeval``: those of its re-evaluation from the saved adapter)."""
+    path = os.path.join(ROOT, "outputs", "ob", "runs", tag, name, "s{}{}.npz".format(seed, ".reeval" if reeval else ""))
     if not os.path.exists(path):
         return None
     with np.load(path) as d:

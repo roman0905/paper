@@ -61,6 +61,23 @@ def score_maps(items: Sequence[Dict[str, Any]], result: Dict[str, Any]) -> List[
     return [{c: float(x) for c, x in zip(cands, s)} for cands, s in zip(result["cands"], result["scores"])]
 
 
+def usability_scores(items: Sequence[Dict[str, Any]], result: Dict[str, Any], m: int) -> np.ndarray:
+    """Claim-level evidence usability a(c): the mean of the ``m`` highest evidence scores among the
+    sentences the verifier read for the claim (0 if it read none)."""
+    return np.array([float(np.mean(sorted(s.values(), reverse=True)[:m])) if s else 0.0 for s in score_maps(items, result)])
+
+
+def rouge_f(references: Sequence[str], hypotheses: Sequence[str]) -> Dict[str, float]:
+    """Mean ROUGE-1 / ROUGE-2 / ROUGE-L F1 of generated texts against their references (stemmed)."""
+    from rouge_score import rouge_scorer
+
+    sc = rouge_scorer.RougeScorer(["rouge1", "rouge2", "rougeL"], use_stemmer=True)
+    rows = [sc.score(r, h) for r, h in zip(references, hypotheses) if r.strip()]
+    if not rows:
+        return {}
+    return {k: float(np.mean([x[k].fmeasure for x in rows])) for k in ("rouge1", "rouge2", "rougeL")}
+
+
 def _mean_auc(groups: Sequence[Tuple[Sequence[float], Sequence[float]]]) -> float:
     """Mean over claims of the AUC of positives against negatives (claims lacking either skipped)."""
     vals = [score_auc(p, n) for p, n in groups if len(p) and len(n)]
@@ -96,12 +113,11 @@ def evidence_diagnostics(items: Sequence[Dict[str, Any]], ranking: Dict[str, V.R
     if select:
         out["halfswap_foreign_sel"] = float(np.mean([np.mean([V.is_foreign(it, tuple(c)) for c in sel])
                                                      for it, sel in zip(items_h, res_h["selected"]) if sel]))
-    top = lambda s: float(np.mean(sorted(s.values(), reverse=True)[:m])) if s else 0.0   # noqa: E731
-    own_top = [top(s) for s in maps]
+    own_top = usability_scores(items, own, m).tolist()
     out["usable_own_mean"] = float(np.mean(own_top))
     for kind, key in (("swap", "usable"), ("nearswap", "usable_near")):
         if kind in perturbed:
-            other_top = [top(s) for s in score_maps(perturbed[kind][0], perturbed[kind][1])]
+            other_top = usability_scores(perturbed[kind][0], perturbed[kind][1], m).tolist()
             out[key + "_swap_mean" if kind == "swap" else key + "_mean"] = float(np.mean(other_top))
             out["auc_" + key] = score_auc(own_top, other_top)
     return out

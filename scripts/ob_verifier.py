@@ -7,6 +7,9 @@
     python scripts/ob_verifier.py --dataset RAWFC --seed 1 --no-claim        # evidence-only control
     python scripts/ob_verifier.py --dataset RAWFC --seed 1 --name sieve \
         --ev-weight 0.5 --train-sample --swap-rate 0.15 --select             # the full method
+    python scripts/ob_verifier.py --dataset RAWFC --seed 1 --name sieve-j \
+        --ev-weight 0.5 --train-sample --swap-rate 0.15 --select \
+        --explain-weight 0.5 --justify                                       # + explanation target
 
 Evidence comes from a first-stage ranking (outputs/ob/rank/<dataset>.<protocol>.<ranker>.json).
 The model is selected by validation macro-F1 after every epoch and then evaluated once on the
@@ -27,7 +30,9 @@ procedure to a changed evidence pool, or change the procedure:
     xfer              (with --transfer) test split of the other dataset, labels mapped to 3 classes
 
 Writes results/ob/runs/<dataset>.<protocol>/<name>/s<seed>.json (metrics, configuration); the
-predictions and the trained adapter go to outputs/ob/runs/ (not tracked).
+predictions and the trained adapter go to outputs/ob/runs/ (not tracked).  ``--eval-only`` loads
+the saved adapter and writes its outputs next to the originals as ``s<seed>.reeval.*``; the
+original result files are never overwritten.
 """
 import argparse
 import json
@@ -47,7 +52,7 @@ from openbook import retrieval as R  # noqa: E402
 from openbook import views as V  # noqa: E402
 from openbook.data import PROTOCOLS, Corpus  # noqa: E402
 from openbook.metrics import classification_metrics  # noqa: E402
-from openbook.verifier import Verifier, fit  # noqa: E402
+from openbook.verifier import Verifier, conclusion_sentences, fit  # noqa: E402
 
 PERTURBATIONS = ("swap", "nearswap", "halfswap", "droptop")
 
@@ -82,6 +87,12 @@ def main():
     ap.add_argument("--train-sample", action="store_true", help="re-sample the training evidence from the pool in every epoch")
     ap.add_argument("--swap-rate", type=float, default=0.0, help="share of training claims shown mismatched evidence")
     ap.add_argument("--select", action="store_true", help="two-pass inference: read the pool, verify on the selected evidence")
+    ap.add_argument("--explain-weight", type=float, default=0.0,
+                    help="weight of the explanation target: language-model loss on the conclusion of the fact-checker's "
+                         "justification, which follows the answer in training only (0: off)")
+    ap.add_argument("--explain-tokens", type=int, default=128, help="maximal length of the explanation target")
+    ap.add_argument("--justify", action="store_true",
+                    help="generate a justification for every test claim and score it with ROUGE (needs --explain-weight)")
     # optimisation
     ap.add_argument("--model", default="/media/dell/DATA/models/Qwen2.5-7B-Instruct")
     ap.add_argument("--seed", type=int, default=1)
@@ -101,11 +112,18 @@ def main():
     ap.add_argument("--train-limit", type=int, default=0, help="use only the first N training claims")
     ap.add_argument("--limit", type=int, default=0, help="debug: cap the size of every split, write nothing")
     ap.add_argument("--force", action="store_true")
+    ap.add_argument("--device", default="cuda")
+    ap.add_argument("--out-root", default=None,
+                    help="tests: read the corpus and the rankings from, and write everything under, this directory "
+                         "instead of the repository")
     args = ap.parse_args()
+    root = args.out_root or ROOT
     if args.select and not args.ev_weight > 0:
         ap.error("--select needs --ev-weight > 0")
     if args.no_claim and (args.closed or args.select):
         ap.error("--no-claim is a single-pass, evidence-only control")
+    if args.justify and not args.explain_weight > 0:
+        ap.error("--justify needs a verifier trained with --explain-weight")
 
     if args.micro_batch is None:
         args.micro_batch = 4 if args.closed else 2
@@ -114,17 +132,23 @@ def main():
     name = run_name(args)
     tag = "{}.{}".format(args.dataset, args.protocol)
     seed_tag = "s0" if args.epochs == 0 else "s{}".format(args.seed)
-    res_path = os.path.join(ROOT, "results", "ob", "runs", tag, name, seed_tag + ".json")
-    pred_path = os.path.join(ROOT, "outputs", "ob", "runs", tag, name, seed_tag + ".npz")
+    res_path = os.path.join(root, "results", "ob", "runs", tag, name, seed_tag + ".json")
+    pred_path = os.path.join(root, "outputs", "ob", "runs", tag, name, seed_tag + ".npz")
     adapter_path = pred_path[:-4] + ".pt"
     if os.path.exists(res_path) and not (args.force or args.limit or args.eval_only):
         print("exists:", res_path)
         return
-    if args.eval_only and not os.path.exists(adapter_path):
-        sys.exit("no saved adapter: " + adapter_path)
+    if args.eval_only:
+        if not os.path.exists(adapter_path):
+            sys.exit("no saved adapter: " + adapter_path)
+        src_res = res_path
+        res_path, pred_path = res_path[:-5] + ".reeval.json", pred_path[:-4] + ".reeval.npz"
+        if os.path.exists(res_path) and not args.force:
+            print("exists:", res_path)
+            return
 
-    corpus = Corpus.load(os.path.join(ROOT, "outputs", "ob", args.dataset + ".json"))
-    rank = {p: R.load_ranking(R.ranking_path(ROOT, args.dataset, p, args.ranker)) for p in PROTOCOLS}
+    corpus = Corpus.load(os.path.join(root, "outputs", "ob", args.dataset + ".json"))
+    rank = {p: R.load_ranking(R.ranking_path(root, args.dataset, p, args.ranker)) for p in PROTOCOLS}
     splits = {s: corpus.split(s) for s in ("train", "val", "test")}
     if args.train_limit:
         splits["train"] = splits["train"][:args.train_limit]
@@ -139,7 +163,8 @@ def main():
     t0 = time.time()
     trained = args.epochs > 0
     v = Verifier(args.model, corpus.label_text, lora_rank=args.rank if trained else 0, max_tokens=args.max_tokens,
-                 grad_checkpoint=not args.closed and not args.no_grad_ckpt, evidence_head=args.ev_weight > 0)
+                 grad_checkpoint=not args.closed and not args.no_grad_ckpt, evidence_head=args.ev_weight > 0,
+                 explain_tokens=args.explain_tokens if args.explain_weight > 0 else 0, device=args.device)
 
     def infer(items, ranking):
         """The inference procedure of this run for the claims ``items`` with the pools ``ranking``."""
@@ -156,7 +181,7 @@ def main():
     summary = {"best_epoch": -1, "epochs_run": 0, "history": [], "train_seconds": 0.0}
     if args.eval_only:
         v.load_state(torch.load(adapter_path, map_location="cpu"))
-        with open(res_path, encoding="utf-8") as f:
+        with open(src_res, encoding="utf-8") as f:
             old = json.load(f)
         summary = dict(old["summary"], history=old["history"])
     elif trained:
@@ -170,14 +195,16 @@ def main():
             return V.withhold_claim(ex) if args.no_claim else ex
 
         summary = fit(v, train_fn, val_score, epochs=args.epochs, lr=args.lr, micro_batch=args.micro_batch,
-                      accum=args.accum, seed=args.seed, lambda_ev=args.ev_weight, log=lambda s: print(s, flush=True))
+                      accum=args.accum, seed=args.seed, lambda_ev=args.ev_weight, lambda_exp=args.explain_weight,
+                      log=lambda s: print(s, flush=True))
         if not args.limit:
             os.makedirs(os.path.dirname(adapter_path), exist_ok=True)
-            torch.save({k: (x.half() if x.is_floating_point() else x) for k, x in v.state().items()}, adapter_path)
+            torch.save(v.state(), adapter_path)        # full precision: a re-evaluation reproduces the run
 
     # ------------------------------------------------------------------------------ evaluation
     test, val = splits["test"], splits["val"]
-    out, ys, ids, extra, selected = {}, {}, {}, {}, {}
+    sub = test                                           # the claims of the perturbed conditions
+    out, ys, ids, extra, selected, usable = {}, {}, {}, {}, {}, {}
 
     def put(key, prob, items):
         out[key], ys[key], ids[key] = prob, labels(items), np.array([it["id"] for it in items])
@@ -202,7 +229,6 @@ def main():
             put("test@read", P.read_ensemble(v, test, own_rank, args.m, args.pool, C, args.eval_batch), test)
             put("val@read", P.read_ensemble(v, val, own_rank, args.m, args.pool, C, args.eval_batch), val)
         put("test@oracle", P.single_pass(v, V.oracle(test, own_rank, args.m, args.pool), C, args.eval_batch)["prob"], test)
-        sub = test
         if args.perturb_n and args.perturb_n < len(test):
             keep = sorted(np.random.RandomState(0).permutation(len(test))[:args.perturb_n])
             sub = [test[i] for i in keep]
@@ -225,13 +251,35 @@ def main():
         extra["nearswap_same_label"] = float((near == labels(sub)).mean())
         if args.ev_weight > 0:
             extra.update(P.evidence_diagnostics(test, own_rank, args.m, main_test, perturbed, args.select))
+            # claim-level evidence usability a(c) under every condition (for the abstention analysis)
+            usable = {"test": P.usability_scores(test, main_test, args.m), "val": P.usability_scores(val, main_val, args.m)}
+            for kind, (items_p, res) in perturbed.items():
+                usable["test@" + kind] = P.usability_scores(items_p, res, args.m)
     if args.transfer:
         other_ds = "LIAR-RAW" if args.dataset == "RAWFC" else "RAWFC"
-        corpus2 = Corpus.load(os.path.join(ROOT, "outputs", "ob", other_ds + ".json"))
+        corpus2 = Corpus.load(os.path.join(root, "outputs", "ob", other_ds + ".json"))
         test2 = corpus2.split("test")[:args.limit or None]
-        res = infer(test2, R.load_ranking(R.ranking_path(ROOT, other_ds, args.protocol, args.ranker)))
+        res = infer(test2, R.load_ranking(R.ranking_path(root, other_ds, args.protocol, args.ranker)))
         out["xfer"], ys["xfer"] = to_three(res["prob"], labels(test2), C)
         ids["xfer"] = np.array([it["id"] for it in test2])
+
+    justified = None
+    if args.justify:
+        # a justification of the verdict, generated from the evidence the verdict was based on
+        # (for the claims of the perturbed conditions: all test claims unless --perturb-n is set)
+        pos = {it["id"]: i for i, it in enumerate(test)}
+        idx = [pos[it["id"]] for it in sub]
+        claims = [test[i] for i in idx]
+        queries = ([V.example(test[i], main_test["selected"][i]) for i in idx] if args.select
+                   else V.closed(claims) if args.closed else V.standard(claims, own_rank, args.m))
+        pred = main_test["prob"].argmax(1)[idx]
+        texts = v.justify(v.encode(queries), pred, max_new_tokens=args.explain_tokens + 8)
+        refs = [v.target_text({"explain": it["explain"]}) for it in claims]
+        full = [" ".join(conclusion_sentences(it["explain"])) for it in claims]
+        extra.update({"rouge_conclusion_" + k: x for k, x in P.rouge_f(refs, texts).items()})
+        extra.update({"rouge_full_" + k: x for k, x in P.rouge_f(full, texts).items()})
+        extra["justify_words"], extra["justify_n"] = float(np.mean([len(t.split()) for t in texts])), float(len(texts))
+        justified = {it["id"]: {"pred": int(p), "label": int(it["label"]), "text": t} for it, p, t in zip(claims, pred, texts)}
 
     metrics = {k: classification_metrics(ys[k], p) for k, p in out.items()}
     result = {
@@ -241,17 +289,22 @@ def main():
                    "rank": args.rank, "lr": args.lr, "epochs": args.epochs, "batch_size": args.micro_batch * args.accum,
                    "max_tokens": args.max_tokens, "ev_weight": args.ev_weight, "train_sample": args.train_sample,
                    "swap_rate": args.swap_rate, "select": args.select, "train_limit": args.train_limit,
+                   "explain_weight": args.explain_weight, "explain_tokens": args.explain_tokens,
                    "perturb_n": args.perturb_n,
                    "grad_checkpoint": not args.closed and not args.no_grad_ckpt},
         "summary": {k: summary[k] for k in ("best_epoch", "epochs_run", "train_seconds")}, "history": summary["history"],
         "metrics": metrics, "extra": extra, "cost": cost, "n_trainable": int(sum(p.numel() for p in v.params)),
         "n_items": {s: len(splits[s]) for s in splits}, "n_eval": {k: int(len(x)) for k, x in ys.items()},
-        "seconds": time.time() - t0, "max_memory_gb": torch.cuda.max_memory_allocated() / 2 ** 30,
+        "seconds": time.time() - t0,
+        "max_memory_gb": torch.cuda.max_memory_allocated() / 2 ** 30 if args.device.startswith("cuda") else 0.0,
     }
     print(name, seed_tag, {k: round(m["macf1"], 4) for k, m in metrics.items()}, flush=True)
     print("   extra", {k: (round(x, 3) if isinstance(x, float) else [round(z, 2) for z in x]) for k, x in extra.items()},
           "max mem {:.1f} GB".format(result["max_memory_gb"]), flush=True)
     if args.limit:
+        if justified:
+            k = next(iter(justified))
+            print("   justification of", k, "->", repr(justified[k]["text"][:300]), flush=True)
         return
     os.makedirs(os.path.dirname(res_path), exist_ok=True)
     with open(res_path, "w", encoding="utf-8") as f:
@@ -262,7 +315,12 @@ def main():
         flat[k + "/prob"] = p.astype(np.float32)
         flat[k + "/label"] = ys[k]
         flat[k + "/id"] = ids[k]
+        if k in usable:
+            flat[k + "/usable"] = usable[k].astype(np.float32)
     np.savez_compressed(pred_path, **flat)
+    if justified is not None:
+        with open(pred_path[:-4] + ".justify.json", "w", encoding="utf-8") as f:
+            json.dump(justified, f, ensure_ascii=False, indent=1)
     if selected:
         # the selected sentences, and the evidence score of every sentence of the test pools
         scores = {it["id"]: [[c[0], c[1], round(x, 4)] for c, x in main_test["scores"].get(it["id"], {}).items()] for it in test}

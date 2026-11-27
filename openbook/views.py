@@ -27,12 +27,15 @@ def example(item: Dict[str, Any], cands: Optional[Sequence[Cand]], kind: str = "
     """A query for ``item`` with the candidate sentences ``cands`` of ``source`` (default: the
     item itself; another claim for mismatched evidence).  Mismatched evidence has no positive tag."""
     src = item if source is None else source
+    own = source is None or source is item
     ex = {"id": item["id"], "claim": item["claim"], "label": item["label"], "kind": kind,
-          "evidence": None, "cands": [], "tags": []}
+          "evidence": None, "cands": [], "tags": [],
+          # training signal only (never rendered into a query); withheld when the evidence is mismatched,
+          # where a justification could not be grounded in what the verifier reads
+          "explain": item.get("explain", "") if own else ""}
     if cands is not None:
         ex["cands"] = list(cands)
         ex["evidence"] = [(src["reports"][ri]["host"], src["reports"][ri]["sents"][si]) for ri, si in cands]
-        own = source is None or source is item
         ex["tags"] = [int(src["reports"][ri]["ev"][si]) if own else 0 for ri, si in cands]
     return ex
 

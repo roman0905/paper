@@ -255,3 +255,177 @@ def test_soft_targets_and_no_head(tiny, corpus, ranking):
     assert np.isfinite(s["history"][0]["loss"]) and s["history"][0]["loss_ev"] == 0.0
     out = P.single_pass(v, train, 3, batch=4)
     assert all(len(x) == 0 for x in out["scores"]) and P.score_auc([0.9, 0.8], [0.1, 0.2]) == 1.0
+
+
+def test_explanation_target(tiny, corpus, ranking):
+    from openbook.verifier import fit
+
+    train, r = corpus.split("train"), ranking["strict"]
+    rng = np.random.RandomState(0)
+    exs = V.training(train[:8], r, 5, rng, top=10, swap_rate=0.5)
+    assert all((ex["explain"] == "") == (ex["kind"] == "swap") for ex in exs)                 # no justification for mismatched evidence
+    assert all("explain" not in str(verifier_prompt(ex["claim"], ex["evidence"], ["a", "b"])) for ex in exs)
+
+    plain = make_verifier(tiny, evidence_head=True)
+    assert all("n_target" not in e for e in plain.encode(exs, targets=True))                  # disabled by default
+    from openbook.verifier import conclusion_sentences
+    text = 'The post went viral in 2019. Officials denied it: see https://example.org/a?b=1 for details. "No such order exists," a spokesman said. The photo was real, but its caption was not.'
+    assert conclusion_sentences(text) == ["The post went viral in 2019.", "Officials denied it: see for details.",
+                                          '"No such order exists," a spokesman said.', "The photo was real, but its caption was not."]
+    assert conclusion_sentences("") == [] and conclusion_sentences("   ") == []
+    v = make_verifier(tiny, evidence_head=True, explain_tokens=24)
+    n_last = len(v.tok(" The photo was real, but its caption was not.", add_special_tokens=False)["input_ids"])
+    n_prev = len(v.tok(' "No such order exists," a spokesman said.', add_special_tokens=False)["input_ids"])
+    assert n_last + n_prev <= 24 < n_last + n_prev + 8
+    assert v.target_text({"explain": text}) == '"No such order exists," a spokesman said. The photo was real, but its caption was not.'
+    tgt = v.target_ids({"explain": text})
+    assert tgt[:len(v.explain_prefix)] == v.explain_prefix and tgt[-1] == v.tok.eos_token_id      # whole sentences from the end, closed
+    short = make_verifier(tiny, explain_tokens=4)
+    assert len(short.target_ids({"explain": text})) == len(short.explain_prefix) + 4 + 1         # a too long final sentence is cut from the left
+    assert short.target_text({"explain": text}).endswith("caption was not.")
+    assert v.target_ids({"explain": ""}) == [] and plain.target_ids({"explain": text}) == []
+
+    v.model.eval()
+    base, enc = v.encode(exs), v.encode(exs, targets=True)
+    for ex, b, e in zip(exs, base, enc):
+        if ex["kind"] == "swap":
+            assert e["ids"] == b["ids"] and "n_target" not in e
+            continue
+        assert e["n_prompt"] == len(b["ids"]) and e["ids"][:e["n_prompt"]] == b["ids"] and e["ev_pos"] == b["ev_pos"]
+        assert e["ids"][e["n_prompt"]] == v.option_ids[ex["label"]]                            # the gold letter follows the query
+        tail = e["ids"][e["n_prompt"] + 1:]
+        assert len(tail) == e["n_target"] and v.tok.decode(tail[:-1]) == "\nJustification: " + v.target_text(ex)
+        assert tail[-1] == v.tok.eos_token_id and v.target_text(ex).startswith("It is")
+
+    # appended targets change neither the verdict nor the evidence scores (the model is causal),
+    # also in a batch that mixes examples with and without targets
+    with torch.no_grad():
+        l0, e0, lm0 = v.forward(base)
+        l1, e1, lm1 = v.forward(enc)
+    assert lm0 is None and lm1 is not None and torch.isfinite(lm1) and float(lm1) > 5.0         # ~ln(vocabulary) before training
+    assert torch.allclose(l0, l1, atol=1e-4) and torch.allclose(e0, e1, atol=1e-4)
+    # the loss is the mean cross-entropy of the target tokens given their prefix
+    k = [i for i, e in enumerate(enc) if "n_target" in e][0]
+    e = enc[k]
+    with torch.no_grad():
+        full = v.model(input_ids=torch.tensor([e["ids"]])).logits[0]
+        want = torch.nn.functional.cross_entropy(full[e["n_prompt"]:e["n_prompt"] + e["n_target"]],
+                                                 torch.tensor(e["ids"][e["n_prompt"] + 1:]))
+        got = v.forward([e])[2]
+    assert abs(float(want) - float(got)) < 1e-3
+
+    # the explanation loss reaches the adapters
+    v.model.train()
+    v.forward(enc)[2].backward()
+    assert any(p.grad is not None and float(p.grad.abs().sum()) > 0 for p in v.adapter_params)
+    for p in v.params:
+        p.grad = None
+
+    val = corpus.split("val")
+    s = fit(v, lambda ep: V.training(train, r, 5, rng, top=10, swap_rate=0.2), lambda: 0.0, epochs=3, lr=2e-3,
+            micro_batch=4, accum=1, seed=0, lambda_ev=0.5, lambda_exp=0.5, log=lambda m: None)
+    assert all(np.isfinite(h["loss_exp"]) and h["loss_exp"] > 0 for h in s["history"])
+    assert s["history"][-1]["loss_exp"] < s["history"][0]["loss_exp"]                          # (a frozen random LM learns slowly)
+    out = P.read_select_verify(v, val, r, 5, 10, 3, batch=4)                                   # inference is unchanged
+    assert out["prob"].shape == (9, 3)
+    q = v.encode(V.standard(val[:3], r, 5))
+    texts = v.justify(q, [0, 1, 2], max_new_tokens=5, batch_size=2)
+    assert len(texts) == 3 and all(isinstance(t, str) for t in texts)
+    s0 = fit(make_verifier(tiny), lambda ep: V.standard(train[:8], r, 4), lambda: 0.0, epochs=1, lr=1e-3, micro_batch=4,
+             accum=1, seed=0, log=lambda m: None)
+    assert s0["history"][0]["loss_exp"] == 0.0
+
+
+def synthetic_corpus(name, sizes=(("train", 24), ("val", 9), ("test", 9))):
+    names = D.LABELS[name]
+    items = []
+    for sp, n in sizes:
+        for i in range(n):
+            raw = raw_claim(i, sp)
+            raw["label"] = names[i % len(names)]
+            items.append(D.normalise(raw, name, sp))
+    return D.Corpus(name, items)
+
+
+def test_script_end_to_end(tiny, tmp_path):
+    """scripts/ob_verifier.py as the pipeline calls it, with a tiny random LM on CPU: every run type,
+    every evaluation condition, the files it writes, and the re-evaluation from a saved adapter."""
+    import json
+    import subprocess
+    import sys
+
+    repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    tok, model = tiny
+    mdir = str(tmp_path / "model")
+    model.save_pretrained(mdir)
+    tok.save_pretrained(mdir)
+    for name in ("RAWFC", "LIAR-RAW"):
+        c = synthetic_corpus(name)
+        c.save(str(tmp_path / "outputs" / "ob" / (name + ".json")))
+        for proto in D.PROTOCOLS:
+            R.save_ranking(R.ranking_path(str(tmp_path), name, proto, "bm25"), {it["id"]: R.bm25_ranking(it, proto) for it in c.items})
+    base = [sys.executable, os.path.join(repo, "scripts", "ob_verifier.py"), "--out-root", str(tmp_path), "--model", mdir,
+            "--device", "cpu", "--m", "4", "--pool", "8", "--max-tokens", "400", "--rank", "4", "--eval-batch", "8", "--seed", "1"]
+    env = dict(os.environ, CUDA_VISIBLE_DEVICES="", HF_HUB_OFFLINE="1", TRANSFORMERS_OFFLINE="1")
+
+    def run(*extra):
+        r = subprocess.run(base + list(extra), env=env, capture_output=True, text=True)
+        assert r.returncode == 0, r.stderr[-3000:]
+        return r.stdout
+
+    def load(tag, name, suffix=".json"):
+        with open(str(tmp_path / "results" / "ob" / "runs" / tag / name / ("s1" + suffix)), encoding="utf-8") as f:
+            return json.load(f)
+
+    out_dir = tmp_path / "outputs" / "ob" / "runs" / "RAWFC.strict" / "sieve-j"
+    full = ["--dataset", "RAWFC", "--epochs", "2", "--name", "sieve-j", "--ev-weight", "0.5", "--train-sample", "--swap-rate", "0.2",
+            "--select", "--explain-weight", "0.5", "--justify", "--transfer", "--perturb-n", "5"]
+    run(*full)
+    res = load("RAWFC.strict", "sieve-j")
+    assert {"val", "test", "test@all", "test@closed", "test@read", "test@avg", "test@bm25", "test@oracle", "test@swap", "test@nearswap",
+            "test@halfswap", "test@droptop", "xfer", "val@read", "val@avg", "val@bm25"} == set(res["metrics"])
+    assert res["n_eval"]["test"] == 9 and res["n_eval"]["test@swap"] == 5 and res["n_eval"]["xfer"] == 9
+    assert len(res["history"]) == 2 and all(h["loss_exp"] > 0 and h["loss_ev"] > 0 for h in res["history"])
+    assert res["config"]["explain_weight"] == 0.5 and res["cost"]["queries"] == 3.0
+    assert {"rouge_conclusion_rougeL", "rouge_full_rouge1", "auc_usable", "auc_usable_near", "silver_p_selected",
+            "swap_pred_share", "nearswap_same_label"} <= set(res["extra"]) and res["extra"]["justify_n"] == 5.0
+    pred = np.load(str(out_dir / "s1.npz"))
+    assert pred["test/prob"].shape == (9, 3) and pred["xfer/prob"].shape == (9, 3) and pred["test@swap/prob"].shape == (5, 3)
+    assert pred["test/usable"].shape == (9,) and pred["test@swap/usable"].shape == (5,) and pred["val/usable"].shape == (9,)
+    assert set(pred["test@swap/id"]) <= set(pred["test/id"])
+    with open(str(out_dir / "s1.justify.json"), encoding="utf-8") as f:
+        just = json.load(f)
+    assert len(just) == 5 and all(set(v) == {"pred", "label", "text"} for v in just.values())
+    with open(str(out_dir / "s1.selected.json"), encoding="utf-8") as f:
+        sel = json.load(f)
+    assert len(sel["test_scores"]) == 9 and all(len(v) == 4 for v in sel["selected"]["test"].values())
+    assert os.path.getsize(str(out_dir / "s1.pt")) > 0
+
+    # a second call does nothing; the re-evaluation from the saved adapter reproduces the run and is kept apart
+    assert "exists:" in run(*full)
+    run(*full, "--eval-only")
+    again = load("RAWFC.strict", "sieve-j", ".reeval.json")
+    for k in res["metrics"]:
+        assert abs(again["metrics"][k]["macf1"] - res["metrics"][k]["macf1"]) < 1e-9, k
+    assert abs(again["extra"]["auc_usable"] - res["extra"]["auc_usable"]) < 1e-9 and again["history"] == res["history"]
+    assert load("RAWFC.strict", "sieve-j") == res and os.path.exists(str(out_dir / "s1.reeval.npz"))
+    assert "exists:" in run(*full, "--eval-only")
+
+    # the other run types of the pipeline
+    run("--dataset", "LIAR-RAW", "--epochs", "1", "--closed")
+    assert set(load("LIAR-RAW.strict", "lora-closed")["metrics"]) == {"val", "test"}
+    run("--dataset", "LIAR-RAW", "--epochs", "1", "--transfer", "--perturb-n", "4")
+    r = load("LIAR-RAW.strict", "lora-bm25-m4")
+    assert {"test@read", "val@read", "test@oracle", "test@nearswap", "xfer"} <= set(r["metrics"]) and "test@bm25" not in r["metrics"]
+    assert r["n_eval"]["test@swap"] == 4 and len(r["extra"]["swap_pred_share"]) == 6 and "auc_usable" not in r["extra"]
+    x = np.load(str(tmp_path / "outputs" / "ob" / "runs" / "LIAR-RAW.strict" / "lora-bm25-m4" / "s1.npz"))
+    assert x["test/prob"].shape == (9, 6) and x["xfer/prob"].shape == (9, 3) and set(x["xfer/label"]) <= {0, 1, 2}
+    run("--dataset", "RAWFC", "--epochs", "1", "--no-claim")
+    assert set(load("RAWFC.strict", "lora-noclaim-bm25-m4")["metrics"]) == {"val", "test", "test@all"}
+    run("--dataset", "RAWFC", "--protocol", "all", "--epochs", "1", "--name", "sieve", "--ev-weight", "0.5", "--train-sample",
+        "--swap-rate", "0.2", "--select")
+    assert "test@strict" in load("RAWFC.all", "sieve")["metrics"]
+    run("--dataset", "RAWFC", "--epochs", "0")
+    with open(str(tmp_path / "results" / "ob" / "runs" / "RAWFC.strict" / "zs-bm25-m4" / "s0.json"), encoding="utf-8") as f:
+        z = json.load(f)
+    assert z["n_trainable"] == 0 and z["summary"]["best_epoch"] == -1 and "test@swap" in z["metrics"]
