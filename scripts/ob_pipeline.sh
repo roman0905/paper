@@ -5,13 +5,14 @@
 #   usage: scripts/ob_pipeline.sh STAGE [STAGE ...]        (normally started by scripts/ob_queue.sh)
 #   stages, in the order they are meant to run:
 #     smoke                   GPU check of the code paths that later stages rely on (writes no results)
-#     refresh                 redo the two RAWFC runs whose result files predate the last evaluation conditions
+#     refresh                 redo the zero-shot RAWFC run, whose result file predates the last evaluation condition
 #     rawfc_main liar_main    main comparison, strict protocol
 #     rawfc_j liar_j          the same verifier trained with the explanation target (sieve-j)
 #     decide                  validation-only rule: is the explanation target part of the final method?
 #     all_protocol            the final method trained and tested with all reports
 #     ablation                the final method with one component removed; evidence-only control
 #     reeval                  re-evaluate saved adapters whose runs predate the per-claim usability scores
+#     sens                    sensitivity: the final method with a higher rate of mismatched evidence in training
 #     llm2                    second backbone (Llama-2-7B-chat) on RAWFC
 #   To stop cleanly, create outputs/logs/ob/STOP: the current run finishes, nothing else is started.
 set -u
@@ -29,10 +30,11 @@ run() {   # run LOGFILE CMD...
 SIEVE="--ev-weight 0.5 --train-sample --swap-rate 0.15 --select"
 EXPL="--explain-weight 0.5 --justify"
 # second backbone; its tokenizer needs ~15% more tokens for the same text, hence the larger limit
-# (so that, as with the first backbone, practically no query loses evidence sentences)
+# (so that, as with the first backbone, practically no query loses evidence sentences);
 MODEL2=${MODEL2_PATH:-/media/dell/DATA/models/llama-2-7b-chat-hf}
 M2=llama2
-X2="--model $MODEL2 --max-tokens 1300"
+# one query per micro-batch (same effective batch size of 16): its hidden states and caches are larger
+X2="--model $MODEL2 --max-tokens 1300 --micro-batch 1 --accum 16"
 # name and flags of the final method: decided on validation data by scripts/ob_decide.py (stage "decide")
 final_name()  { $PY scripts/ob_decide.py 2>> $LOG/pipeline.log; }
 flags_of()    { if [ "$1" = sieve-j ]; then echo "$SIEVE $EXPL"; else echo "$SIEVE"; fi; }
@@ -58,12 +60,12 @@ smoke)        # nothing is written with --limit; the output goes to smoke.log
   run smoke.log $PY scripts/ob_verifier.py --dataset RAWFC --seed 1 --epochs 1 --limit 48 --name smoke $SIEVE $EXPL --transfer
   run smoke.log $PY scripts/ob_verifier.py --dataset LIAR-RAW --seed 1 --epochs 1 --limit 48 --perturb-n 16 --name smoke $SIEVE $EXPL
   run smoke.log $PY scripts/ob_verifier.py --dataset RAWFC $X2 --seed 1 --epochs 1 --limit 32 --name smoke $SIEVE $EXPL ;;
-refresh)      # same configuration and seed as before; only the set of evaluation conditions is completed
+refresh)      # the zero-shot run on RAWFC predates one evaluation condition; it involves no training, so
+              # redoing it only completes the set of conditions.  (Trained runs are never redone: the
+              # first RoBERTa runs lack some perturbed conditions and are reported with fewer seeds there.)
   D=RAWFC
   missing results/ob/runs/$D.strict/zs-bm25-m16/s0.json test@nearswap && \
-    run zs.$D.log $PY scripts/ob_verifier.py --dataset $D --epochs 0 --force
-  missing results/ob/runs/$D.strict/roberta-large-bm25@lr2e-5/s1.json test@nearswap && \
-    run slm.$D.log $PY scripts/ob_slm.py --dataset $D --seed 1 --lr 2e-5 --epochs 10 --name roberta-large-bm25@lr2e-5 --force ;;
+    run zs.$D.log $PY scripts/ob_verifier.py --dataset $D --epochs 0 --force ;;
 rawfc_main)   # main comparison on RAWFC, strict protocol, 5 seeds
   D=RAWFC
   run zs.$D.log $PY scripts/ob_verifier.py --dataset $D --epochs 0 --closed
@@ -126,6 +128,12 @@ reeval)       # the first RAWFC "sieve" runs predate the storing of per-claim us
         run reeval.$D.log $PY scripts/ob_verifier.py --dataset $D --seed $s --name sieve $SIEVE --eval-only
     done
   fi ;;
+sens)         # RAWFC, 3 seeds: mismatched evidence for 30% instead of 15% of the training claims
+  F=$(final_name) || { note "stage $STAGE skipped: no decision"; continue; }
+  D=RAWFC; FE=""; [ "$F" = sieve-j ] && FE="$EXPL"
+  for s in 1 2 3; do
+    run sens.$D.log $PY scripts/ob_verifier.py --dataset $D --seed $s --name $F-swap30 --ev-weight 0.5 --train-sample --swap-rate 0.30 --select $FE
+  done ;;
 llm2)         # second backbone on RAWFC, 3 seeds
   F=$(final_name) || { note "stage $STAGE skipped: no decision"; continue; }
   D=RAWFC

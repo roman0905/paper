@@ -49,31 +49,52 @@ def welch(a: Sequence[float], b: Sequence[float]) -> float:
 
 
 def summarise(seeds: Dict[int, Dict[str, Any]]) -> Dict[str, Any]:
-    """Mean / std over seeds of every metric of every evaluation condition of one method."""
+    """Mean / std over seeds of every metric of every evaluation condition of one method.  A
+    condition is averaged over the seeds that have it; its ``n`` says how many those are."""
     runs = list(seeds.values())
-    out: Dict[str, Any] = {"seeds": sorted(seeds), "n": len(runs)}
-    for cond in sorted(set.intersection(*[set(r["metrics"]) for r in runs])):
-        out[cond] = {m: ms([r["metrics"][cond][m] for r in runs]) for m in METRICS if m in runs[0]["metrics"][cond]}
-        n_cls = sum(1 for k in runs[0]["metrics"][cond] if k.startswith("f1_") and k[3:].isdigit())
-        out[cond]["per_class"] = [float(np.mean([r["metrics"][cond]["f1_%d" % c] for r in runs])) for c in range(n_cls)]
+    out: Dict[str, Any] = {"seeds": sorted(seeds), "n": len(runs), "partial": []}
+    for cond in sorted(set.union(*[set(r["metrics"]) for r in runs])):
+        have = [r for r in runs if cond in r["metrics"]]
+        if len(have) < len(runs):
+            out["partial"].append(cond)
+        out[cond] = {m: ms([r["metrics"][cond][m] for r in have]) for m in METRICS if m in have[0]["metrics"][cond]}
+        out[cond]["n"] = len(have)
+        n_cls = sum(1 for k in have[0]["metrics"][cond] if k.startswith("f1_") and k[3:].isdigit())
+        out[cond]["per_class"] = [float(np.mean([r["metrics"][cond]["f1_%d" % c] for r in have])) for c in range(n_cls)]
     extra = [r.get("extra") or {} for r in runs]
-    keys = set.intersection(*[set(e) for e in extra]) if extra else set()
     out["extra"] = {}
-    for k in sorted(keys):
-        if isinstance(extra[0][k], list):
-            out["extra"][k] = np.mean([e[k] for e in extra], axis=0).tolist()
+    for k in sorted(set.union(*[set(e) for e in extra]) if extra else set()):
+        vals = [e[k] for e in extra if k in e]
+        if isinstance(vals[0], list):
+            out["extra"][k] = np.mean(vals, axis=0).tolist()
         else:
-            out["extra"][k] = ms([e[k] for e in extra])
+            out["extra"][k] = ms(vals)
     out["best_epoch"] = [r["summary"]["best_epoch"] for r in runs]
+    out["val_history"] = np.mean([[h["val"] for h in r["history"]] for r in runs], axis=0).tolist() \
+        if runs[0].get("history") and len({len(r["history"]) for r in runs}) == 1 else []
     out["train_seconds"] = float(np.mean([r["summary"]["train_seconds"] for r in runs]))
     out["seconds"] = float(np.mean([r["seconds"] for r in runs]))
     out["n_trainable"] = int(runs[0].get("n_trainable", 0))
     cost = [r.get("cost") for r in runs if r.get("cost")]
     if cost:
         out["cost"] = {k: float(np.mean([c[k] for c in cost])) for k in cost[0]}
-    if runs[0].get("max_memory_gb"):
-        out["max_memory_gb"] = float(np.max([r["max_memory_gb"] for r in runs]))
+    mem = [r["max_memory_gb"] for r in runs if r.get("max_memory_gb")]
+    if mem:
+        out["max_memory_gb"] = float(np.max(mem))
     return out
+
+
+def ensemble(tag: str, name: str, runs: Dict[int, Dict[str, Any]], cond: str = "test") -> Optional[Dict[str, Any]]:
+    """The seed ensemble of a method (mean of the class probabilities over its seeds): labels,
+    predicted classes and metrics on a condition."""
+    ps = [load_preds(tag, name, s) for s in sorted(runs)]
+    ps = [p for p in ps if p is not None and cond + "/prob" in p]
+    if len(ps) < 2 or len({tuple(map(str, p[cond + "/id"])) for p in ps}) != 1:
+        return None
+    prob = np.mean([p[cond + "/prob"].astype(np.float64) for p in ps], axis=0)
+    y = ps[0][cond + "/label"]
+    m = classification_metrics(y, prob)
+    return {"y": y, "pred": prob.argmax(1), "n_seeds": len(ps), "metrics": {k: m[k] for k in ("macf1", "macp", "macr", "acc", "f1_h", "mae")}}
 
 
 def _ids(tag: str, name: str, runs: Dict[int, Dict[str, Any]], cond: str) -> Optional[List[str]]:

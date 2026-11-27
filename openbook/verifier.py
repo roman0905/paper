@@ -250,8 +250,13 @@ class Verifier:
                 for e, y in zip(encoded, labels)]
         out: List[str] = [""] * len(seqs)
         order = np.argsort([len(x) for x in seqs])
-        for s in range(0, len(order), batch_size):
-            idx = order[s:s + batch_size]
+        s = 0
+        while s < len(order):
+            # the key/value cache grows with batch x length (and is large without grouped-query
+            # attention), so long queries are generated in smaller batches
+            longest = len(seqs[order[min(s + batch_size, len(order)) - 1]]) + max_new_tokens
+            idx = order[s:s + max(1, min(batch_size, 8000 // longest))]
+            s += len(idx)
             ids, att, _, _ = self._batch([{"ids": seqs[i], "ev_pos": []} for i in idx])
             with torch.autocast("cuda", dtype=torch.bfloat16, enabled=self.amp):
                 gen = self.model.generate(input_ids=ids, attention_mask=att, max_new_tokens=max_new_tokens, do_sample=False,
