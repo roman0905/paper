@@ -1,11 +1,15 @@
 \begin{tabular}{llcccccc}
 \toprule
- & & \multicolumn{2}{c}{全部测试声明} & \multicolumn{2}{c}{含被标记报道的声明} & \multicolumn{2}{c}{不含被标记报道的声明} \\
+ & & \multicolumn{2}{c}{全部测试声明（F1）} & \multicolumn{2}{c}{含被标记报道（Acc）} & \multicolumn{2}{c}{不含被标记报道（Acc）} \\
 \cmidrule(lr){3-4}\cmidrule(lr){5-6}\cmidrule(lr){7-8}
 数据集 & 方法 & 严格 & 全部报道 & 严格 & 全部报道 & 严格 & 全部报道 \\
 \midrule
-RAWFC（34 / 166） & 零样本 LLM + 证据 & 48.79 & 50.10 & 67.65 & 64.71 & 51.20 & 52.41 \\
- & RoBERTa-large + 证据 & 59.74 & 60.64 & 66.18 & 72.06 & 58.43 & 58.43 \\
+RAWFC & 零样本 LLM + 证据 & 48.79 & 50.10 & 67.65 & 64.71 & 51.20 & 52.41 \\
+ & RoBERTa-large + 证据 & 58.21 & 58.60 & 69.41 & 71.76 & 55.66 & 55.66 \\
+ & LoRA-LLM + 证据 & 62.38 & 61.98 & 65.88 & 65.29 & 61.45 & 61.08 \\
 \midrule
+LIAR-RAW & 零样本 LLM + 证据 & 17.53 & 18.51 & 21.73 & 23.68 & 24.78 & 24.33 \\
+ & RoBERTa-large + 证据 & 28.77 & 29.67 & 27.67 & 30.55 & 28.77 & 28.77 \\
+ & LoRA-LLM + 证据 & 32.77 & 35.31 & 31.34 & 38.58 & 32.51 & 32.62 \\
 \bottomrule
 \end{tabular}

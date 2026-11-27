@@ -1,0 +1,23 @@
+\begin{tabular}{lcccccccc}
+\toprule
+ & \multicolumn{4}{c}{RAWFC} & \multicolumn{4}{c}{LIAR-RAW} \\
+\cmidrule(lr){2-5}\cmidrule(lr){6-9}
+比较（前者减后者） & $\Delta$ & 95\% CI & $p_{\text{样本}}$ & $p_{\text{种子}}$ & $\Delta$ & 95\% CI & $p_{\text{样本}}$ & $p_{\text{种子}}$ \\
+\midrule
+\multicolumn{9}{l}{\emph{原始测试集}} \\
+LoRA-LLM：有证据 $-$ 无证据 & +9.89 & [+4.10, +15.51] & $<$0.001 & $<$0.001 & +2.80 & [+0.83, +5.50] & 0.010 & 0.017 \\
+RoBERTa-large：有证据 $-$ 无证据 & +9.52 & [+3.73, +15.18] & $<$0.001 & 0.070 & +0.05 & [$-$1.89, +2.08] & 0.950 & 0.970 \\
+LoRA-LLM + 证据 $-$ RoBERTa-large + 证据 & +4.16 & [$-$1.42, +9.85] & 0.145 & $<$0.001 & +4.00 & [+1.27, +6.72] & 0.005 & 0.041 \\
+\ours{} $-$ LoRA-LLM + 证据 & -- & -- & -- & -- & -- & -- & -- & -- \\
+\ours{} $-$ RoBERTa-large + 证据 & -- & -- & -- & -- & -- & -- & -- & -- \\
+\ours{} $-$ LoRA-LLM（无证据） & -- & -- & -- & -- & -- & -- & -- & -- \\
+\midrule
+\multicolumn{9}{l}{\emph{证据来自相近声明}} \\
+\ours{} $-$ LoRA-LLM + 证据 & -- & -- & -- & -- & -- & -- & -- & -- \\
+\ours{} $-$ LoRA-LLM（无证据，原始输入） & -- & -- & -- & -- & -- & -- & -- & -- \\
+\midrule
+\multicolumn{9}{l}{\emph{证据来自随机声明}} \\
+\ours{} $-$ LoRA-LLM + 证据 & -- & -- & -- & -- & -- & -- & -- & -- \\
+\ours{} $-$ LoRA-LLM（无证据，原始输入） & -- & -- & -- & -- & -- & -- & -- & -- \\
+\bottomrule
+\end{tabular}

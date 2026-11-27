@@ -1,0 +1,12 @@
+\begin{tabular}{lcccccc}
+\toprule
+ & \multicolumn{3}{c}{RAWFC} & \multicolumn{3}{c}{LIAR-RAW} \\
+\cmidrule(lr){2-4}\cmidrule(lr){5-7}
+方法 & 种子数 & 单模型均值 & 集成 & 种子数 & 单模型均值 & 集成 \\
+\midrule
+RoBERTa-large + 证据 & 5 & 58.21 & 60.81 & 3 & 28.77 & 30.09 \\
+LoRA-LLM（无证据） & 5 & 52.49 & 51.71 & 3 & 29.97 & 29.90 \\
+LoRA-LLM + 证据 & 5 & 62.38 & 63.44 & 2 & 32.77 & 32.81 \\
+\ours{} & -- & -- & -- & -- & -- & -- \\
+\bottomrule
+\end{tabular}

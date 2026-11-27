@@ -110,7 +110,10 @@ def legend(ax, **kw):
 
 
 def save(fig, path: str) -> None:
-    fig.savefig(path)
     if path.endswith(".pdf"):
+        # no creation date: regenerating a figure from unchanged results must give the same bytes
+        fig.savefig(path, metadata={"CreationDate": None})
         fig.savefig(path[:-4] + ".png", dpi=200)
+    else:
+        fig.savefig(path)
     plt.close(fig)
