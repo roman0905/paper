@@ -71,14 +71,42 @@ def star(cmp):
     return "$^{*}$" if M.both_sig(cmp) else ""
 
 
-def cond_value(A, D, key, cond):
-    """macro-F1 of a method under a condition, on the claims the perturbed conditions use (on
-    LIAR-RAW a fixed subset of the test claims), so that a row of a table is comparable."""
+def cond_stat(A, D, key, cond):
+    """(mean, std over seeds, number of seeds) of the macro-F1 of a method under a condition, on the
+    claims the perturbed conditions use (on LIAR-RAW a fixed subset of the test claims), so that a
+    row of a table is comparable."""
     if cond == "test":
         c = cmp_of(A, D, key + "@swap_vs_own")
-        return c["b"] if c else get(methods(A, D), key + "/test/macf1/mean")
-    c = cmp_of(A, D, "{}@{}_vs_own".format(key, cond.split("@")[1]))
-    return c["a"] if c else get(methods(A, D), "{}/{}/macf1/mean".format(key, cond))
+        if c:
+            return c["b"], c.get("std_b", 0.0), c["n_b"]
+    else:
+        kind = cond.split("@")[1]
+        # "no evidence" is evaluated on the whole test split: restrict it to the claims of the perturbed conditions
+        c = cmp_of(A, D, "{}@closed_vs_{}@swap".format(key, key) if kind == "closed" else "{}@{}_vs_own".format(key, kind))
+        if c:
+            return c["a"], c.get("std_a", 0.0), c["n_a"]
+    m = get(methods(A, D), "{}/{}/macf1".format(key, cond))
+    return (m["mean"], m["std"], m["n"]) if m else (None, None, 0)
+
+
+def cond_value(A, D, key, cond):
+    return cond_stat(A, D, key, cond)[0]
+
+
+def closed_reference(A, D):
+    """The closed-book verifier on the claims the perturbed conditions use: (mean, std, seeds)."""
+    c = cmp_of(A, D, "ours@swap_vs_lora_closed") or cmp_of(A, D, "lora_ev@swap_vs_lora_closed")
+    if c:
+        return c["b"], c.get("std_b", 0.0), c["n_b"]
+    m = get(methods(A, D), "lora_closed/test/macf1")
+    return (m["mean"], m["std"], m["n"]) if m else (None, None, 0)
+
+
+def stat_cell(stat):
+    mean, std, n = stat
+    if mean is None:
+        return "--"
+    return num(mean) + (r"\pmstd{" + num(std) + "}" if n > 1 else "")
 
 
 # ------------------------------------------------------------------------------------------ tables
@@ -239,28 +267,27 @@ def tab_sig(A):
 
 
 def tab_robust(A):
+    """Macro-F1 (mean and std over seeds) under the evidence-controlled test conditions, one block per dataset."""
     n = len(CONDS)
-    out = [r"\begin{tabular}{l" + "c" * (2 * n) + "}", r"\toprule",
-           r" & \multicolumn{%d}{c}{" % n + DS_LABEL["RAWFC"] + r"} & \multicolumn{%d}{c}{" % n + DS_LABEL["LIAR-RAW"] + r"} \\",
-           r"\cmidrule(lr){2-%d}\cmidrule(lr){%d-%d}" % (n + 1, n + 2, 2 * n + 1),
-           "方法 & " + " & ".join(c for _ in DS for _, c in CONDS) + r" \\", r"\midrule"]
-    for key in ("zs_ev", "slm_ev", "lora_ev", "ours"):
-        cells = [num(cond_value(A, D, key, cond)) for D in DS for cond, _ in CONDS]
-        out.append(LONG[key] + " & " + " & ".join(cells) + r" \\")
-    out.append(r"\midrule")
-    cells = []
+    out = [r"\begin{tabular}{l" + "c" * n + "}", r"\toprule", "方法 & " + " & ".join(c for _, c in CONDS) + r" \\"]
     for D in DS:
-        c = cmp_of(A, D, "ours@swap_vs_lora_closed") or cmp_of(A, D, "lora_ev@swap_vs_lora_closed")
-        v = c["b"] if c else get(methods(A, D), "lora_closed/test/macf1/mean")
-        cells += [num(v)] + ["--"] * (n - 2) + [num(v)]
-    out.append(LONG["lora_closed"] + "（参照） & " + " & ".join(cells) + r" \\")
+        sub = get(A, D + "/strict/compare/lora_ev@swap_vs_own/n_items")
+        total = get(A, D + "/stats/test/claims")
+        title = DS_LABEL[D] + ("，测试集中固定的 {:,} 条".format(sub) if sub and total and sub != total else "")
+        out += [r"\midrule", r"\multicolumn{%d}{l}{\emph{%s}} \\" % (n + 1, title)]
+        for key in ("zs_ev", "slm_ev", "lora_ev", "ours"):
+            if key in methods(A, D):
+                out.append(LONG[key] + " & " + " & ".join(stat_cell(cond_stat(A, D, key, cond)) for cond, _ in CONDS) + r" \\")
+        ref = stat_cell(closed_reference(A, D))
+        out.append(LONG["lora_closed"] + "（参照） & " + " & ".join([ref] + ["--"] * (n - 2) + [ref]) + r" \\")
     out += [r"\bottomrule", r"\end{tabular}"]
     return "\n".join(out) + "\n"
 
 
 def tab_behaviour(A):
     """What the verifiers predict when the pool belongs to another claim."""
-    rows = [("own_conf", "原始输入下的平均置信度", 2, 1.0), ("nearswap_conf", "证据来自相近声明时的平均置信度", 2, 1.0),
+    rows = [("ece", "原始输入下的期望校准误差（ECE）", 3, 1.0),
+            ("own_conf", "原始输入下的平均置信度", 2, 1.0), ("nearswap_conf", "证据来自相近声明时的平均置信度", 2, 1.0),
             ("swap_conf", "证据来自随机声明时的平均置信度", 2, 1.0),
             ("swap_low", "证据来自随机声明时，预测为最低等级的比例（\\%）", 1, 100.0),
             ("nearswap_acc_source_label", "证据来自相近声明时，预测等于\\emph{证据所属声明}标签的比例（\\%）", 1, 100.0),
@@ -275,6 +302,8 @@ def tab_behaviour(A):
                 if key == "swap_low":
                     v = get(methods(A, D), m + "/extra/swap_pred_share")
                     v = v[0] if v else None
+                elif key == "ece":
+                    v = get(methods(A, D), m + "/test/ece/mean")
                 else:
                     v = get(methods(A, D), "{}/extra/{}/mean".format(m, key))
                 cells.append(num(v, d, scale))
@@ -589,12 +618,12 @@ def fig_robust(A, path):
             m = methods(A, D).get(key)
             if not m or any(c not in m for c, _ in conds):
                 continue
-            ys = [100 * cond_value(A, D, key, c) for c, _ in conds]
-            es = [100 * m[c]["macf1"]["std"] for c, _ in conds]
+            stats = [cond_stat(A, D, key, c) for c, _ in conds]
+            ys = [100 * s[0] for s in stats]
+            es = [100 * (s[1] or 0.0) for s in stats]
             handles[label] = P.line(ax, range(len(conds)), ys, slot, label, yerr=es)
             drawn = True
-        c = cmp_of(A, D, "ours@swap_vs_lora_closed") or cmp_of(A, D, "lora_ev@swap_vs_lora_closed")
-        ref = c["b"] if c else get(methods(A, D), "lora_closed/test/macf1/mean")
+        ref = closed_reference(A, D)[0]
         if ref is not None:
             handles["LoRA-LLM（无证据）"] = ax.axhline(100 * ref, color=P.NEUTRAL, linewidth=1.2, zorder=2)
         ax.set_xticks(range(len(conds)))
@@ -662,15 +691,24 @@ def figure(name, fn, A):
 def write_numbers(A):
     """The numeric leaves that the text references, as the macros of the closed-book chapter:
     \\ptwo{R/strict/methods/...} for RAWFC, \\ptwo{L/...} for LIAR-RAW, \\ptwo{D/...} for the
-    validation-only decision record, \\pone{X/...} for the training-split analysis of the
-    justification texts.  Re-run after referencing a new path in the text (make_assets.used_numbers)."""
+    validation-only decision record, X/, T/ and P/ for side analyses and published numbers (see
+    below).  Re-run after referencing a new path in the text (make_assets.used_numbers)."""
     trees = [(SHORT[D], A[D]) for D in DS] + ([("D", A["decision"])] if "decision" in A else [])
-    seg = os.path.join(ROOT, "results", "ob", "explain_segments.json")
-    if os.path.exists(seg):
-        with open(seg, encoding="utf-8") as f:
-            trees.append(("X", json.load(f)))
+    # small side analyses, each in its own file: X = justification segments (training split only),
+    # T = how much evidence the encoder baseline reads
+    for short, name in (("X", "explain_segments.json"), ("T", "slm_truncation.json")):
+        path = os.path.join(ROOT, "results", "ob", name)
+        if os.path.exists(path):
+            with open(path, encoding="utf-8") as f:
+                trees.append((short, json.load(f)))
+    # P = published numbers, already in percent: \ftwo{P/qazi2025derec/rawfc/f1}
+    pub = {}
+    for p in A["published"]["methods"] + A["published"]["other_evidence"]:
+        pub[p["key"]] = {k: dict(zip(("p", "r", "f1"), [x for x in p[k]])) for k in ("rawfc", "liar") if p.get(k)}
+        pub[p["key"]] = {k: {a: b for a, b in v.items() if b is not None} for k, v in pub[p["key"]].items()}
+    trees.append(("P", pub))
     used = M.used_numbers(OUT, os.path.join(ROOT, "thesis"))
-    lines, n, missing = M.number_lines(trees, used, ["R", "L", "D", "X"])
+    lines, n, missing = M.number_lines(trees, used, ["R", "L", "D", "X", "T", "P"])
     head = ["% generated by scripts/ob_assets.py from results/ob/analysis.json - do not edit",
             "% only the numbers referenced in the LaTeX sources are defined; re-run the script after adding a reference",
             "\\makeatletter"]

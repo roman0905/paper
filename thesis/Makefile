@@ -6,7 +6,7 @@ main.pdf: main.tex hnuthesis.cls refs.bib $(wildcard chapters/*.tex) $(wildcard 
 	bibtex main >> build.log 2>&1 || (tail -30 build.log; exit 1)
 	$(TEX) >> build.log 2>&1
 	$(TEX) >> build.log 2>&1
-	@grep -E "undefined|multiply defined|Overfull \\\\hbox \([0-9]{2,}" main.log | sort | uniq -c | head -20 || true
+	@grep -E "undefined|multiply defined|Overfull \\\\hbox \([0-9]{2,}" main.log | grep -v "Font shape" | sort | uniq -c | head -20 || true
 	@# a number macro whose path has no value prints as ??path?? (see gen/numbers.tex)
 	@if command -v pdftotext > /dev/null; then pdftotext main.pdf - | grep -o "??[^?]*??" | sort | uniq -c | head -20; fi || true
 

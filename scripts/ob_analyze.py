@@ -210,6 +210,9 @@ def comparisons(tag, runs, names, C, other):
             add("{}@{}_vs_lora_closed".format(m, kind), cmp(m, c, "lora_closed", "test"))
         for m in ("ours", "sieve", "sievej", "lora_ev", "zs_ev", "slm_ev", "noswap", "nosample", "nohead"):
             add("{}@{}_vs_own".format(m, kind), cmp(m, c, m, "test"))
+    # ---- "no evidence" on the claims the perturbed conditions use (a subset on LIAR-RAW): side a
+    for m in ("ours", "sieve", "sievej", "lora_ev", "zs_ev", "slm_ev"):
+        add("{}@closed_vs_{}@swap".format(m, m), cmp(m, "test@closed", m, "test@swap"))
     # ---- the other evidence protocol at test time
     for m in ("ours", "sieve", "sievej", "lora_ev", "zs_ev", "slm_ev", "noclaim"):
         add("{}@{}_vs_own".format(m, other), cmp(m, "test@" + other, m, "test"))
@@ -389,6 +392,10 @@ def protocol_section(D, protocol, corpus, final_run):
     C = len(LABELS[D])
     other = "all" if protocol == "strict" else "strict"
     out = {"names": names, "methods": {k: RP.summarise(runs[n]) for k, n in names.items()}, "grid": {}}
+    for m in out["methods"].values():      # share of the claims predicted as the lowest level, per perturbed condition
+        low = {kind: m["extra"][kind + "_pred_share"][0] for kind in PERTURBED if kind + "_pred_share" in m["extra"]}
+        if low:
+            m["low_share"] = low
     if final_run:
         out["final"] = {v: k for k, v in RUN_OF.items()}[final_run]
     for grid in GRIDS.values():               # the whole learning-rate grid of the SLM baselines
@@ -569,6 +576,7 @@ def main():
         res["dump_rows"] = dump_rows(corpus)
         res["labels"] = {sp: np.bincount([it["label"] for it in corpus.split(sp)], minlength=corpus.n_classes).tolist()
                          for sp in ("train", "val", "test")}
+        res["label_share"] = {sp: {str(i): c / max(sum(v), 1) for i, c in enumerate(v)} for sp, v in res["labels"].items()}
         sections = {}
         for protocol in ("strict", "all"):
             try:

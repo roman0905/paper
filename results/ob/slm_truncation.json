@@ -1,0 +1,18 @@
+{
+ "datasets": {
+  "LIAR-RAW": {
+   "claims": 1251,
+   "mean_tokens": 523.9312549960032,
+   "sentences_fit_share": 0.8978374535092154,
+   "truncated_share": 0.5515587529976019
+  },
+  "RAWFC": {
+   "claims": 200,
+   "mean_tokens": 607.87,
+   "sentences_fit_share": 0.8165178571428572,
+   "truncated_share": 0.81
+  }
+ },
+ "m": 16,
+ "max_len": 512
+}

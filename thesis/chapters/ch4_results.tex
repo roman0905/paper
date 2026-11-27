@@ -1,0 +1,228 @@
+\section{实验结果与分析}\label{sec:ob-results}
+
+除特别说明外，本节的结果都在严格协议下得到；“\ours{}”指按 \ref{sec:ob-setup}~节的规则选定的版本。
+
+\subsection{主要结果}\label{sec:ob-main}
+
+\begin{table}[htbp]
+\centering\small
+\caption{严格协议下各方法在测试集上的结果（\%）}\label{tab:ob-main}
+\fittable{gen/ob_tables/main.tex}
+\note{P、R、F1 为宏平均的精确率、召回率与 F1，Acc 为准确率。可训练的方法为多个随机种子的均值（RAWFC 5 个，LIAR-RAW 3 个），$\pm$ 后为 macro-F1 在种子间的标准差；零样本 LLM 没有随机性。加粗为该数据集上最高的 macro-F1。}
+\end{table}
+
+\begin{table}[htbp]
+\centering\small
+\caption{主要比较的显著性检验}\label{tab:ob-sig}
+\fittable{gen/ob_tables/sig.tex}
+\note{$\Delta$ 为前者减后者的 macro-F1 差值（百分点）。95\% 置信区间与 $p_{\text{样本}}$ 来自对测试样本的配对 bootstrap，$p_{\text{种子}}$ 来自对随机种子的 Welch 检验；两个 $p$ 值都小于 0.05 才称差异显著。后两组比较在证据受控的条件下进行（\ref{sec:ob-conditions}~节，LIAR-RAW 上为 400 条的子集）；“原始输入”指闭卷模型的输入不含证据，因而不受这些条件影响。}
+\end{table}
+
+表~\ref{tab:ob-main} 给出各方法在严格协议下的结果，表~\ref{tab:ob-sig} 给出主要比较的检验结果。有三点观察。
+
+\textbf{证据带来可靠的提升，但幅度因数据集而异。}给 LoRA-LLM 加上 BM25 检索到的前 16 句证据，RAWFC 上的 macro-F1 由 \ptwo{R/strict/methods/lora_closed/test/macf1/mean} 升到 \ptwo{R/strict/methods/lora_ev/test/macf1/mean}，LIAR-RAW 上由 \ptwo{L/strict/methods/lora_closed/test/macf1/mean} 升到 \ptwo{L/strict/methods/lora_ev/test/macf1/mean}；两个差值（\dptwo{R/strict/compare/lora_ev_vs_lora_closed/diff_mean} 与 \dptwo{L/strict/compare/lora_ev_vs_lora_closed/diff_mean} 个点）按两种检验都显著。RAWFC 上的提升是 LIAR-RAW 上的三倍多。两个数据集的证据条件确实不同：RAWFC 的 BM25 前 16 句中有 \pone{R/strict/methods/ours/extra/silver_p_bm25/mean}\% 带银标证据标签，LIAR-RAW 只有 \pone{L/strict/methods/ours/extra/silver_p_bm25/mean}\%；后者还要在六个相邻的等级之间做区分，而“基本属实”与“半真半假”的界限更多取决于核查机构的评级尺度，不是某一句证据能够决定的。零样本 LLM 同样从证据中获益（RAWFC 上由 \ptwo{R/strict/methods/zs_closed/test/macf1/mean} 到 \ptwo{R/strict/methods/zs_ev/test/macf1/mean}），但与微调后的模型相去甚远，在 LIAR-RAW 上即使读入证据也只有 \ptwo{L/strict/methods/zs_ev/test/macf1/mean}：把声明归入细粒度的等级，需要模型与核查机构的评级尺度对齐，这一点不经训练难以做到。
+
+\textbf{微调的 LLM 比编码器更能用好证据。}RoBERTa-large 读入同样的证据后，在 RAWFC 上提高了 \ptwo{R/strict/compare/slm_ev_vs_slm_closed/diff_mean} 个点。这一差值通过了对测试样本的检验，没有通过对种子的检验（$p_{\text{种子}}\peq{R/strict/compare/slm_ev_vs_slm_closed/welch_p}$），因为只读声明的 RoBERTa-large 在种子间的标准差高达 \ptwo{R/strict/methods/slm_closed/test/macf1/std} 个点。在 LIAR-RAW 上它没有从证据中得到任何提升（\ptwo{L/strict/methods/slm_closed/test/macf1/mean} 与 \ptwo{L/strict/methods/slm_ev/test/macf1/mean}）。读入证据的 LoRA-LLM 在两个数据集上都高于读入同样证据的 RoBERTa-large（\dptwo{R/strict/compare/lora_ev_vs_slm_ev/diff_mean} 与 \dptwo{L/strict/compare/lora_ev_vs_slm_ev/diff_mean} 个点）：LIAR-RAW 上的差异显著，RAWFC 上的差异没有通过对测试样本的检验（$p_{\text{样本}}\peq{R/strict/compare/lora_ev_vs_slm_ev/bootstrap/p}$）。编码器 512 个词元的输入上限不是主要原因：按 RoBERTa 的分词，一条声明的 16 句证据中平均有 \pone{T/datasets/RAWFC/sentences_fit_share}\%（RAWFC）与 \pone{T/datasets/LIAR-RAW/sentences_fit_share}\%（LIAR-RAW）能够完整读入。
+
+\textbf{在标准测试集上，\ours{} 与 LoRA-LLM + 证据没有可靠的差别。}\ours{} 在两个数据集上的 macro-F1 为 \ptwo{R/strict/methods/ours/test/macf1/mean} 与 \ptwo{L/strict/methods/ours/test/macf1/mean}，比 LoRA-LLM + 证据高 \ptwo{R/strict/compare/ours_vs_lora_ev/diff_mean} 与 \ptwo{L/strict/compare/ours_vs_lora_ev/diff_mean} 个点。RAWFC 上的差值通过了对种子的检验（两种方法在种子间都很稳定），但没有通过对测试样本的检验（$p_{\text{样本}}\peq{R/strict/compare/ours_vs_lora_ev/bootstrap/p}$）；LIAR-RAW 上的差值更小（$p_{\text{样本}}\peq{L/strict/compare/ours_vs_lora_ev/bootstrap/p}$）。因此，就标准测试集上的准确性而言，不能认为 \ours{} 优于直接读入检索结果的 LoRA-LLM。两者的差别在别处：证据不可用时它们的行为完全不同（\ref{sec:ob-robust}~节），\ours{} 还给出了可以用来判断证据是否可用的得分（\ref{sec:ob-evidence}~节）。
+
+\subsection{与已发表结果的对照}\label{sec:ob-published}
+
+\begin{table}[htbp]
+\centering\small
+\caption{与已发表结果的对照（\%）}\label{tab:ob-published}
+\fittable{gen/ob_tables/published.tex}
+\note{已发表数值取自各自的论文。$\dagger$：F1 为宏平均精确率与召回率的调和平均，其余为各类别 F1 的平均；$\ddagger$：数值转引自其他论文。FFRR 去除了检测到的泄漏文档，其余方法使用数据集的全部报道。本章的结果为多个随机种子的均值。}
+\end{table}
+
+表~\ref{tab:ob-published} 把本章的结果与已有工作在这两个数据集上报告的数值放在一起。这些数值之间不能做严格的比较：所用的 LLM 从 7B 的开源模型到 GPT-4o 不等，多数没有报告随机种子间的波动，F1 的口径有两种，证据协议也与本章默认的严格协议不同。以下的对照只用来说明本章结果所处的大致位置。
+
+在严格协议下，\ours{} 在 RAWFC 上的 macro-F1（\ptwo{R/strict/methods/ours/test/macf1/mean}）与 DeReC（\ftwo{P/qazi2025derec/rawfc/f1}）、G-Defense（\ftwo{P/wang2026gdefense/rawfc/f1}）处于同一水平，高于 L-Defense（\ftwo{P/wang2024ldefense/rawfc/f1}），低于调用 GPT-3.5 或 GPT-4o 的 FACETS（\ftwo{P/nguyen2025facets/rawfc/f1}）与 DelphiAgent（\ftwo{P/xiong2025delphiagent/rawfc/f1}）。在 LIAR-RAW 上（\ptwo{L/strict/methods/ours/test/macf1/mean}）与 DeReC（\ftwo{P/qazi2025derec/liar/f1}）相当，高于 L-Defense（\ftwo{P/wang2024ldefense/liar/f1}）与 G-Defense（\ftwo{P/wang2026gdefense/liar/f1}），低于 FACETS（\ftwo{P/nguyen2025facets/liar/f1}）。KG-CRAFT 报告的数值远高于其余全部方法，在 LIAR-RAW 上高出约 40 个点；我们没有见到其他工作复现这一结果，这里列出，但不把它作为比较对象。
+
+\pending{全部报道协议下训练的结果，以及与已发表数值在同一协议下的对照}
+
+需要说明两点。第一，本章没有在标准准确率上超过已发表的最好结果，这也不是本章的目标；本章关心的是这些数值没有反映的两件事——证据来源对结果的影响（\ref{sec:ob-leak}~节）与证据不可用时模型的行为（\ref{sec:ob-robust}~节）。第二，表中使用 GPT 系列模型的方法需要为每条声明调用商用接口生成解释或进行多轮推理；本章的全部方法只用一个 7B 的开源模型，训练与推理都在单张 24GB 显存的显卡上完成。
+
+\subsection{证据泄漏的影响}\label{sec:ob-leak}
+
+\begin{table}[htbp]
+\centering\small
+\caption{严格协议下训练的模型在两种测试协议下的结果（\%）}\label{tab:ob-protocol}
+\fittable{gen/ob_tables/protocol.tex}
+\note{“严格”与“全部报道”指测试时候选池取自哪些报道；模型都是在严格协议下训练的。“含被标记报道”为测试集中至少有一篇报道被标记的声明（RAWFC \cnt{R/strict/leak/n/any} 条，LIAR-RAW \cnt{L/strict/leak/n/any} 条），“不含被标记报道”为其余声明。$^{*}$ 表示与同一模型在严格协议下的结果差异显著。}
+\end{table}
+
+\subsubsection{测试时放回被标记的报道}
+表~\ref{tab:ob-protocol} 把严格协议下训练的模型分别在两种协议下测试。这些模型在训练中从未见过被标记的报道，两列之间的差别只来自测试时多出来的那些报道。
+
+在 LIAR-RAW 上，放回被标记的报道后，LoRA-LLM + 证据的 macro-F1 由 \ptwo{L/strict/compare/lora_ev@all_vs_own/b} 升到 \ptwo{L/strict/compare/lora_ev@all_vs_own/a}，\ours{} 由 \ptwo{L/strict/compare/ours@all_vs_own/b} 升到 \ptwo{L/strict/compare/ours@all_vs_own/a}。提升全部来自含被标记报道的那部分声明：\ours{} 在这 \cnt{L/strict/leak/n/any} 条声明上的准确率由 \ptwo{L/strict/leak/methods/ours/any/own/acc}\% 升到 \ptwo{L/strict/leak/methods/ours/any/other/acc}\%，在其余声明上不变（两种协议下它们的候选池相同）。也就是说，仅仅在测试时多读入占总数不到 3\% 的报道，LIAR-RAW 上的结果就高出 2 个点以上，这与 \ours{} 相对于 LoRA-LLM + 证据、乃至表~\ref{tab:ob-published} 中许多方法彼此之间的差距处于同一量级。RoBERTa-large 与零样本 LLM 也有上升，幅度较小。
+
+在 RAWFC 上，被标记的报道只涉及 \cnt{R/strict/leak/n/any} 条测试声明，放回之后各方法的变化都在 1 个点上下，没有达到显著水平。
+
+\subsubsection{训练时也使用被标记的报道}
+\pending{全部报道协议下训练的模型（表~\ref{tab:ob-cross}）}
+
+\begin{table}[htbp]
+\centering\small
+\caption{\ours{} 在两种协议下训练与测试的结果（macro-F1，\%）}\label{tab:ob-cross}
+\fittable{gen/ob_tables/cross.tex}
+\note{相同随机种子的模型。“含被标记报道”与“不含被标记报道”的含义同表~\ref{tab:ob-protocol}。$^{*}$ 表示与“严格协议下训练、严格测试”的结果差异显著。}
+\end{table}
+
+\subsubsection{只读证据的对照}
+\pending{只读证据的对照（隐去声明文本）在两种协议下的结果}
+
+\subsubsection{小结}
+已有工作在这两个数据集上报告的数值都是在全部报道下得到的。上面的结果表明，其中有一部分来自那些转述了核查结论、甚至直接印有标签的报道；这一部分的大小在 LIAR-RAW 上足以改变方法之间的排序。我们建议在这两个数据集上同时报告两种协议下的结果。
+
+\subsection{证据不可用时的行为}\label{sec:ob-robust}
+
+\begin{table}[htbp]
+\centering\small
+\caption{证据受控的测试条件下的 macro-F1（\%）}\label{tab:ob-robust}
+\fittable{gen/ob_tables/robust.tex}
+\note{各条件的定义见 \ref{sec:ob-conditions}~节；$\pm$ 后为随机种子间的标准差。每种方法沿用它自己的推理方式。最后一行的闭卷 LoRA-LLM 不读证据，不受这些条件影响，列出作为参照。LIAR-RAW 上全部条件在同一个 400 条的子集上评估，因此“原始”一列与表~\ref{tab:ob-main} 的数值不同。}
+\end{table}
+
+\begin{figure}[htbp]
+\centering
+\genfigure{gen/ob_figures/robust.pdf}
+\caption{证据逐步变差时各方法的 macro-F1}\label{fig:ob-robust}
+\note{阴影为随机种子间的标准差，灰色横线为不读证据的闭卷 LoRA-LLM。数值见表~\ref{tab:ob-robust}。}
+\end{figure}
+
+\begin{table}[htbp]
+\centering\small
+\caption{两个 LoRA 验证器的置信度与错配证据下的预测行为}\label{tab:ob-behaviour}
+\fittable{gen/ob_tables/behaviour.tex}
+\note{置信度为预测类别的概率；期望校准误差按 10 个等宽的置信度区间计算。最低等级在 RAWFC 中为“假”，在 LIAR-RAW 中为 pants-fire。}
+\end{table}
+
+表~\ref{tab:ob-robust} 与图~\ref{fig:ob-robust} 给出各方法在 \ref{sec:ob-conditions}~节定义的条件下的结果，表~\ref{tab:ob-behaviour} 给出两个 LoRA 验证器的预测行为。
+
+\textbf{直接读入检索结果的验证器会被错配的证据带偏，而且置信度很高。}在 RAWFC 上，把候选池换成随机声明的句子后，LoRA-LLM + 证据的 macro-F1 由 \ptwo{R/strict/compare/lora_ev@swap_vs_own/b} 降到 \ptwo{R/strict/compare/lora_ev@swap_vs_own/a}，换成相近声明的句子时为 \ptwo{R/strict/compare/lora_ev@nearswap_vs_own/a}，远低于完全不看证据的闭卷 LoRA-LLM（相差 \dptwo{R/strict/compare/lora_ev@swap_vs_lora_closed/diff_mean} 与 \dptwo{R/strict/compare/lora_ev@nearswap_vs_lora_closed/diff_mean} 个点）。表~\ref{tab:ob-behaviour} 显示了它是怎样出错的：证据来自随机声明时，它把 \pone{R/strict/methods/lora_ev/low_share/swap}\% 的声明判为最低等级“假”（测试集中这一类只占 \pone{R/label_share/test/0}\%），平均置信度不降反升，由 \ftwo{R/strict/methods/lora_ev/extra/own_conf/mean} 升到 \ftwo{R/strict/methods/lora_ev/extra/swap_conf/mean}。换言之，模型把“这些材料不支持这条声明”读成了“这条声明是假的”。数据集中没有“证据不足”这一类别，训练时证据又总是属于声明自己，模型没有机会学到两者的区别。零样本 LLM 的表现相同，此时它把 \pone{R/strict/methods/zs_ev/low_share/swap}\% 的声明判为“假”；RoBERTa-large 的下降幅度略小（\ptwo{R/strict/compare/slm_ev@swap_vs_own/a}），但也远低于它只读声明的版本（\ptwo{R/strict/methods/slm_closed/test/macf1/mean}）。
+
+\textbf{\ours{} 在错配证据下明显更好，但没有完全退回到闭卷水平。}同样的条件下，\ours{} 在 RAWFC 上为 \ptwo{R/strict/compare/ours@swap_vs_own/a}（随机声明）与 \ptwo{R/strict/compare/ours@nearswap_vs_own/a}（相近声明），比 LoRA-LLM + 证据高 \ptwo{R/strict/compare/ours_vs_lora_ev@swap/diff_mean} 与 \ptwo{R/strict/compare/ours_vs_lora_ev@nearswap/diff_mean} 个点，两个差异按两种检验都显著（表~\ref{tab:ob-sig}）。证据来自随机声明时，它判为“假”的比例为 \pone{R/strict/methods/ours/low_share/swap}\%，平均置信度由 \ftwo{R/strict/methods/ours/extra/own_conf/mean} 降到 \ftwo{R/strict/methods/ours/extra/swap_conf/mean}：模型没有一边倒地判假，也表现出了应有的不确定。
+
+不过，\ours{} 与闭卷 LoRA-LLM 之间仍有差距（\dptwo{R/strict/compare/ours@swap_vs_lora_closed/diff_mean} 与 \dptwo{R/strict/compare/ours@nearswap_vs_lora_closed/diff_mean} 个点）。这一差距通过了对测试样本的检验，没有通过对种子的检验：不同种子的模型在错配证据下的表现相差很大，证据来自随机声明时，5 个种子的 macro-F1 在 \ptwo{R/strict/methods/ours/test@swap/macf1/min} 到 \ptwo{R/strict/methods/ours/test@swap/macf1/max} 之间，证据来自相近声明时在 \ptwo{R/strict/methods/ours/test@nearswap/macf1/min} 到 \ptwo{R/strict/methods/ours/test@nearswap/macf1/max} 之间，有的种子达到了闭卷水平，有的低十几个点。完全不给证据时（“无证据”一列）情况相同，\ours{} 为 \ptwo{R/strict/methods/ours/test@closed/macf1/mean}：RAWFC 的每条训练声明都有候选句，模型在训练中没有见过空的证据列表。错配证据训练的目标是让模型在证据无关时退回到只凭声明的判断，这一目标在 RAWFC 上只是部分达到；\ref{sec:ob-gate}~节考察用可用性得分显式地回退能否补上这一差距。
+
+在 LIAR-RAW 上，各方法在错配证据下的下降幅度小得多，因为证据本来带来的提升就小。证据来自随机声明时，LoRA-LLM + 证据为 \ptwo{L/strict/compare/lora_ev@swap_vs_own/a}（同一子集上原始输入为 \ptwo{L/strict/compare/lora_ev@swap_vs_own/b}），\ours{} 为 \ptwo{L/strict/compare/ours@swap_vs_own/a}（原始输入为 \ptwo{L/strict/compare/ours@swap_vs_own/b}），闭卷 LoRA-LLM 在这一子集上为 \ptwo{L/strict/compare/ours@swap_vs_lora_closed/b}。\pending{LIAR-RAW 三个种子的显著性结论}
+
+\textbf{部分错配与检索质量下降的影响较小。}候选池中混入一半外来句子时，\ours{} 在两个数据集上都不受影响（RAWFC 上 \ptwo{R/strict/compare/ours@halfswap_vs_own/a} 对 \ptwo{R/strict/compare/ours@halfswap_vs_own/b}，LIAR-RAW 上 \ptwo{L/strict/compare/ours@halfswap_vs_own/a} 对 \ptwo{L/strict/compare/ours@halfswap_vs_own/b}）：打分头把大部分外来句子排除在选出的证据之外（\ref{sec:ob-evidence}~节）。LoRA-LLM + 证据此时读入的 16 句中有一半是外来的，它在 RAWFC 上几乎不受影响，在 LIAR-RAW 上变化 \dptwo{L/strict/compare/lora_ev@halfswap_vs_own/diff_mean} 个点；RoBERTa-large 在 RAWFC 上变化 \dptwo{R/strict/compare/slm_ev@halfswap_vs_own/diff_mean} 个点。去掉 BM25 排在最前面的 16 句后，两个 LoRA 验证器在 RAWFC 上各下降 2 到 3 个点，仍明显高于闭卷模型：RAWFC 的候选池中银标证据充足，排名靠后的句子同样有用。
+
+\textbf{\ours{} 的置信度校准得更好。}在原始输入下，\ours{} 在 RAWFC 上的期望校准误差为 \fthree{R/strict/methods/ours/test/ece/mean}，LoRA-LLM + 证据为 \fthree{R/strict/methods/lora_ev/test/ece/mean}；后者的平均置信度（\ftwo{R/strict/methods/lora_ev/extra/own_conf/mean}）远高于它的准确率（\ptwo{R/strict/methods/lora_ev/test/acc/mean}\%）。LIAR-RAW 上两者为 \fthree{L/strict/methods/ours/test/ece/mean} 与 \fthree{L/strict/methods/lora_ev/test/ece/mean}。训练中混入证据与声明无关、因而只能凭声明作答的样本，并在每一轮更换证据，使模型不那么容易对训练样本过度自信。
+
+\subsection{证据打分与证据选择}\label{sec:ob-evidence}
+
+\begin{table}[htbp]
+\centering\small
+\caption{证据得分的诊断}\label{tab:ob-evidence}
+\fittable{gen/ob_tables/evidence.tex}
+\note{在测试集上计算，多个随机种子的均值。AUC 为 ROC 曲线下面积，0.5 相当于随机。“外来句”指混入候选池的另一条声明的句子，它们占候选池的一半。}
+\end{table}
+
+\begin{table}[htbp]
+\centering\small
+\caption{同一组模型在不同推理方式下的 macro-F1（\%）}\label{tab:ob-infer}
+\fittable{gen/ob_tables/infer.tex}
+\note{各行使用相同的模型参数，只改变测试时的推理方式；“默认”为训练中用于选择检查点的方式。$^{\S}$ 用测试样本的银标证据标签选句，不是合法的测试条件，只作为上限参考。}
+\end{table}
+
+\subsubsection{打分头学到了什么}
+表~\ref{tab:ob-evidence} 从三个角度考察证据得分。
+
+其一，它与银标证据标签的一致程度中等。证据得分区分银标证据句与其余候选句的 AUC 在 RAWFC 上为 \fthree{R/strict/methods/ours/extra/auc_silver/mean}，在 LIAR-RAW 上为 \fthree{L/strict/methods/ours/extra/auc_silver/mean}。模型选出的 16 句中，银标证据的占比高于 BM25 的前 16 句（RAWFC 上 \pone{R/strict/methods/ours/extra/silver_p_selected/mean}\% 对 \pone{R/strict/methods/ours/extra/silver_p_bm25/mean}\%，LIAR-RAW 上 \pone{L/strict/methods/ours/extra/silver_p_selected/mean}\% 对 \pone{L/strict/methods/ours/extra/silver_p_bm25/mean}\%），提高的幅度有限。
+
+其二，它能分辨句子是否属于这条声明。候选池中混入一半外来句子时，证据得分区分两者的 AUC 为 \fthree{R/strict/methods/ours/extra/auc_own_vs_foreign/mean} 与 \fthree{L/strict/methods/ours/extra/auc_own_vs_foreign/mean}，选出的 16 句中外来句只占 \pone{R/strict/methods/ours/extra/halfswap_foreign_sel/mean}\% 与 \pone{L/strict/methods/ours/extra/halfswap_foreign_sel/mean}\%，而它们在候选池中占一半。这解释了 \ref{sec:ob-robust}~节中 \ours{} 在“混入一半”条件下不受影响的现象。
+
+其三，声明级的可用性得分能够识别整个候选池不属于这条声明的情形。它区分“本声明的证据”与“随机声明的证据”的 AUC 在 RAWFC 上为 \fthree{R/strict/methods/ours/extra/auc_usable/mean}，在 LIAR-RAW 上为 \fthree{L/strict/methods/ours/extra/auc_usable/mean}；对更难的“相近声明的证据”，两个数据集上为 \fthree{R/strict/methods/ours/extra/auc_usable_near/mean} 与 \fthree{L/strict/methods/ours/extra/auc_usable_near/mean}。LIAR-RAW 上后一个数值明显更低：该数据集的声明集中于美国政治，文本相近的两条声明往往谈论同一人物或同一议题，为其中一条检索到的报道对另一条也有一定的相关性，仅凭“是否相关”难以把它们分开。这正是 \ref{sec:ob-train}~节预计的局限。
+
+\subsubsection{读—选—判是否优于单遍推理}
+表~\ref{tab:ob-infer} 对同一组模型参数比较了不同的推理方式。对 \ours{}，读—选—判比只读 BM25 前 16 句的单遍推理高 \ptwo{R/strict/compare/ours_vs_ours@bm25/diff_mean}（RAWFC）与 \ptwo{L/strict/compare/ours_vs_ours@bm25/diff_mean}（LIAR-RAW）个点，但两个差值都没有达到显著水平；把读入候选池的各次预测直接取平均、不做选择，结果与读—选—判相当。对没有打分头的 LoRA-LLM + 证据，读完候选池取平均同样只带来不到 1 个点的变化。因此，现有结果不足以说明“由模型自己选择证据”能提高准确率；可以确定的只是，它没有带来损失，并且提供了上一小节所述的得分。
+
+\subsubsection{证据上限}
+表~\ref{tab:ob-infer} 中标有 $\S$ 的两行在测试时直接用银标证据标签选句。它没有带来提升：\ours{} 在 RAWFC 上为 \ptwo{R/strict/methods/ours/test@oracle/macf1/mean}（默认推理为 \ptwo{R/strict/methods/ours/test/macf1/mean}），LoRA-LLM + 证据为 \ptwo{R/strict/methods/lora_ev/test@oracle/macf1/mean}（默认为 \ptwo{R/strict/methods/lora_ev/test/macf1/mean}），LIAR-RAW 上同样如此。这是一个值得注意的否定性结果：在这两个数据集上，把更多带银标标签的句子送给验证器并不能提高判断的准确率。银标标签由句子与核查结论文本的相似度得到，它衡量的是“像不像核查文章”，与“对判断是否有用”并不等同；进一步提高证据选择与银标标签的一致程度，看来不是提升准确率的方向。
+
+\subsection{消融实验}\label{sec:ob-ablation}
+
+\begin{table}[htbp]
+\centering\small
+\caption{\ours{} 各项设计的消融（RAWFC，macro-F1，\%）}\label{tab:ob-ablation}
+\fittable{gen/ob_tables/ablation.tex}
+\note{相同的 3 个随机种子，$\pm$ 后为种子间的标准差；各列条件的定义见 \ref{sec:ob-conditions}~节。$^{*}$ 表示与完整方法的差异显著。}
+\end{table}
+
+\pending{消融结果：去掉错配证据训练、去掉证据重采样、去掉打分头；错配概率的敏感性}
+
+\subsection{解释目标}\label{sec:ob-explain-results}
+
+\begin{table}[htbp]
+\centering\small
+\caption{使用与不使用解释目标的 \ours{}（macro-F1，\%）}\label{tab:ob-explain}
+\fittable{gen/ob_tables/explain.tex}
+\note{两个版本使用相同的随机种子（RAWFC 5 个，LIAR-RAW 3 个）。“随机声明”为证据来自随机声明的测试条件。取舍只依据“验证”两列。$^{*}$ 表示差异显著。}
+\end{table}
+
+\pending{解释目标的判定结果、两个版本的比较、生成说明的质量}
+
+\subsection{基于可用性得分的回退}\label{sec:ob-gate}
+
+\begin{table}[htbp]
+\centering\small
+\caption{基于可用性得分的回退（macro-F1，\%）}\label{tab:ob-gate}
+\fittable{gen/ob_tables/gate.tex}
+\note{阈值为验证集上可用性得分的 5\% 分位数；被回退的声明改用相同随机种子的闭卷 LoRA-LLM 的预测。LIAR-RAW 上后三列在 400 条的子集上评估。$^{*}$ 表示与不回退的差异显著。}
+\end{table}
+
+\begin{figure}[htbp]
+\centering
+\genfigure{gen/ob_figures/usable.pdf}
+\caption{证据可用性得分在三种候选池下的分布}\label{fig:ob-usable}
+\note{测试集，多个随机种子的平均。}
+\end{figure}
+
+\pending{回退的结果（需要全部种子的可用性得分）}
+
+\subsection{多种子集成、跨数据集与骨干模型}\label{sec:ob-more}
+
+\begin{table}[htbp]
+\centering\small
+\caption{多种子集成的 macro-F1（\%）}\label{tab:ob-ensemble}
+\fittable{gen/ob_tables/ensemble.tex}
+\note{集成为同一方法各随机种子的模型输出的类别概率的平均。}
+\end{table}
+
+\begin{table}[htbp]
+\centering\small
+\caption{跨数据集的结果（三分类，\%）}\label{tab:ob-transfer}
+\fittable{gen/ob_tables/transfer.tex}
+\note{箭头左侧为训练数据集，右侧为测试数据集；LIAR-RAW 的六个等级两两合并为三级。参照行为在目标数据集上训练的同一方法（LIAR-RAW 上把六分类的输出合并为三级后计算）。}
+\end{table}
+
+\begin{table}[htbp]
+\centering\small
+\caption{更换骨干模型后的结果（RAWFC，macro-F1，\%）}\label{tab:ob-llm2}
+\fittable{gen/ob_tables/llm2.tex}
+\note{Llama-2-7B 为 3 个随机种子，Qwen2.5-7B 为 5 个；“相近声明”“随机声明”为证据受控的测试条件。}
+\end{table}
+
+\pending{集成、跨数据集与更换骨干模型的结果}
+
+\subsection{计算开销}\label{sec:ob-cost}
+
+\begin{table}[htbp]
+\centering\small
+\caption{训练与推理的开销}\label{tab:ob-cost}
+\fittable{gen/ob_tables/cost.tex}
+\note{单张 RTX 3090。训练时间为单个随机种子的平均值，包含每轮结束后在验证集上的评估；推理的词元数为每条声明各次前向计算的输入之和。}
+\end{table}
+
+\pending{开销}
+
+\section{讨论与局限}\label{sec:ob-discussion}
+
+\pending{讨论与局限}
+
+\section{本章小结}\label{sec:ob-summary}
+
+\pending{本章小结}

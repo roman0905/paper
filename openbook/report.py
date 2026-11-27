@@ -39,7 +39,8 @@ def load_preds(tag: str, name: str, seed: int, reeval: bool = False) -> Optional
 
 def ms(values: Sequence[float]) -> Dict[str, float]:
     v = [float(x) for x in values]
-    return {"mean": float(np.mean(v)), "std": float(np.std(v, ddof=1)) if len(v) > 1 else 0.0, "n": len(v)}
+    return {"mean": float(np.mean(v)), "std": float(np.std(v, ddof=1)) if len(v) > 1 else 0.0, "n": len(v),
+            "min": float(np.min(v)), "max": float(np.max(v))}
 
 
 def welch(a: Sequence[float], b: Sequence[float]) -> float:
@@ -156,6 +157,7 @@ def compare(tag_a: str, runs_a: Dict[int, Dict[str, Any]], name_a: str, cond_a: 
         return {}
     fa, fb = list(sa.values()), list(sb.values())
     out: Dict[str, Any] = {"a": float(np.mean(fa)), "b": float(np.mean(fb)), "diff_mean": float(np.mean(fa) - np.mean(fb)),
+                           "std_a": ms(fa)["std"], "std_b": ms(fb)["std"],
                            "welch_p": welch(fa, fb), "n_a": len(fa), "n_b": len(fb), "n_items": len(common_items)}
     seeds = sorted(set(sa) & set(sb))
     al = []

@@ -35,11 +35,20 @@
 
 % ---------------------------------------------------------------- 本文用到的命令
 % 由脚本生成的表格：只在超出版心宽度时缩小
-\newcommand{\fittable}[1]{\adjustbox{max width=\linewidth}{\input{#1}}}
+\newcommand{\fittable}[1]{\IfFileExists{#1}{\adjustbox{max width=\linewidth}{\input{#1}}}%
+  {\fbox{\small 表格尚未生成：\texttt{\detokenize{#1}}}}}
+% 由脚本生成的图：文件尚未生成时显示占位框
+\newcommand{\genfigure}[2][width=\linewidth]{\IfFileExists{#2}{\includegraphics[#1]{#2}}%
+  {\fbox{\small 图尚未生成：\texttt{\detokenize{#2}}}}}
+% 写作过程中的待补标记（定稿时全文不应再出现）
+\newcommand{\pending}[1]{\textbf{【待补：#1】}}
 \newcommand{\pmstd}[1]{{\scriptsize$\pm$#1}}
 \newcommand{\method}{CLARA}
 \newcommand{\student}{CLARA-D}
 \newcommand{\ours}{SIEVE}
+% 强调：中文用楷体，西文用斜体。模板在目录之后把中文字体固定为宋体，宋体没有斜体，
+% 默认的 \emph 对中文不起作用。
+\DeclareRobustCommand{\emph}[1]{{\kaishu\itshape #1}}
 \DeclareMathOperator{\logit}{logit}
 \DeclareMathOperator{\softplus}{softplus}
 \newcommand{\sg}{\operatorname{sg}}
